@@ -1,0 +1,882 @@
+#+property: header-args :dir ../source/ :cache yes :noweb yes :exports code :eval no :results output
+#+options: toc:nil num:nil
+
+#+title: Sensor Port 
+#+author: Lewis Collum
+
+*** Tasks [0/3]
+**** IN-PROGRESS Nodes need to handle multiple inputs                :T712_1:
+**** TODO Nodes with feedback capabilities                           :T712_2:
+**** TODO Kalman Expectation Maximization algorithm for covariance matrices :T715_1:
+
+
+* Modules
+** quaternion
+#+BEGIN_SRC python :tangle ../source/quaternion.py
+class Quaternion:
+    normalizingStrategy = None
+    
+    def __init__(self, vector, scalar: float):        
+        self.vector = vector
+        self.scalar = scalar
+        
+    def rotateVector(self, vector):
+        quaternionFromVector = Quaternion(vector=vector, scalar=0)
+        resultantQuaternion = self * quaternionFromVector * self.conjugate()
+        return resultantQuaternion.vector
+        
+    def conjugate(self):
+        conjugatedVector = -self.vector.copy()
+        return Quaternion(vector=conjugatedVector, scalar=self.scalar)
+        
+    def __mul__(self, other):
+        b1, c1, d1 = self.vector
+        a1 = self.scalar
+        b2, c2, d2 = other.vector
+        a2 = other.scalar
+
+        w = a1*a2 - b1*b2 - c1*c2 - d1*d2
+        x = a1*b2 + b1*a2 + c1*d2 - d1*c2
+        y = a1*c2 - b1*d2 + c1*a2 + d1*b2
+        z = a1*d2 + b1*c2 - c1*b2 + d1*a2
+        return Quaternion(vector=self.vector.__class__([x, y, z]), scalar=w)
+    
+    def normalize(self):
+        Quaternion.normalizingStrategy(self)
+#+END_SRC
+
+   Two quaternions, that represent two distinct rotations, can be
+   multiplied together to get a single, resultant, rotation
+   (https://en.wikipedia.org/wiki/Quaternion#Hamilton_product). This
+   property allows a quaternion to be applied to a vector
+   (e.g. acceleration) by "conjugating" the quaternion by the vector
+   ([[https://en.wikipedia.org/wiki/Quaternions_and_spatial_rotation#Using_quaternion_as_rotations]]).
+
+   In the class ~Quaternion~, the multiplication operator, ~__mul__~,
+   is overloaded to represent Hamiltonian multiplication.
+   
+   Quaternions can be applied to vectors, via "conjugation", using
+   ~applyToVector~.
+
+#+BEGIN_SRC python :tangle ../source/test_quaternion.py
+import unittest
+import quaternion
+
+class TestQuaternion(unittest.TestCase):
+
+    def test_rotateListVector(self):
+        self.quaternion = quaternion.Quaternion([0, 0, 0], 1)        
+
+if __name__ == '__main__':
+    unittest.main()
+#+END_SRC
+
+** splitter
+#+BEGIN_SRC python :tangle ../source/splitter.py
+import observer
+import copy
+
+class Splitter(observer.Observer):
+    def __init__(self):
+        self.nodes = {}
+        
+    def addNamedNode(self, name: str, node):
+        self.nodes[name] = node
+
+    def hasNamedNode(self, name: str):
+        return name in self.nodes
+        
+    def onUpdateFromSubject(self, package):
+        self.nodes[package["name"]].onUpdateFromSubject(package)
+
+
+class BranchBuilder:
+    def __init__(self, 
+        
+class SplitterBranchReplicator(observer.Observer):
+    def __init__(self, headOfBranch):
+        self.head = headOfBranch
+        self.splitter = Splitter()
+        
+    def onUpdateFromSubject(self, package):
+        if not self.splitter.hasNamedNode(name=package["name"]):
+            self.splitter.addNamedNode(name=package["name"], node=copy.copy(self.head))
+#+END_SRC
+
+*** COMMENT
+#+BEGIN_SRC python
+class Handler(observer.Observer):
+    def __init__(self, name: str, subject, successor: Handler):
+        self.subject = subject
+        self.successor = successor
+
+    def onUpdateFromSubject(self, package):
+        if package[self.name] == self.name:
+            self.handle(package)
+        else:
+            self.forward(package)
+
+    def handle(self, package):
+        self.subject.notifySubscribers(package)
+
+    def forward(self, package):
+        if self.successor != None:
+            self.successor.onUpdateFromSubject(package)
+#+END_SRC
+
+** encoder
+#+BEGIN_SRC python :tangle ../source/encoder.py
+import json
+import numpy
+
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, numpy.ndarray):
+            return obj.tolist()
+        return json.JSONEncoder.default(self, obj)
+#+END_SRC
+** node
+#+BEGIN_SRC python :tangle ../source/node.py
+import observer
+import categorizer as cat
+import strategy
+import json
+
+class CategoryNode(observer.Observer, observer.Subject):
+    def __init__(self, categorizer: cat.Categorizer):
+        super(CategoryNode, self).__init__()
+        self.categorizer = categorizer
+        
+    def onUpdateFromSubject(self, package: str):
+        self.categorizer.categorizeLine(line = json.loads(package))
+
+    def onCloseFromSubject(self):
+        self.notifyObservers(self.categorizer.categorized)
+
+class StrategyNode(observer.Observer, observer.Subject):
+    def __init__(self, strategy: strategy.Strategy):
+        super(StrategyNode, self).__init__()
+        self.strategy = strategy
+
+    def onUpdateFromSubject(self, package):
+        self.package = package
+        self.package["values"] = self.strategy.execute(input = package["values"])
+        package.setdefault("strategies", []).append(self.strategy.__class__.__name__)
+        self.notifyObservers(self.package)
+
+class JsonLoadNode(observer.Observer, observer.Subject):
+    def onUpdateFromSubject(self, package):
+        self.notifyObservers(json.loads(package))
+
+class JsonDumpNode(observer.Observer, observer.Subject):
+    def __init__(self, jsonEncoder = None):
+        super(JsonDumpNode, self).__init__()
+        self.jsonEncoder = jsonEncoder
+
+    def onUpdateFromSubject(self, package):
+        self.notifyObservers(package=json.dumps(package, cls = self.jsonEncoder))
+
+#+END_SRC
+** strategy
+#+BEGIN_SRC python :tangle ../source/strategy.py
+import pair 
+
+class Strategy:
+    def execute(self, input):
+        pass
+            
+class VarianceStrategy(Strategy):
+    def __init__(self, initial):
+        self.mean = pair.Pair(initial = initial)
+        self.variance = initial
+        self.count = 0
+
+    def execute(self, input):
+        self.mean.shift()
+        self.count += 1
+        deviation = input - self.mean.previous
+        self.mean.offsetFromPrevious(deviation/self.count)
+        deviationCurrent = input - self.mean.current
+        self.variance += deviation*deviationCurrent
+        return self.variance/self.count
+
+#+END_SRC
+** categorizer
+#+BEGIN_SRC python :tangle ../source/categorizer.py
+class Categorizer:
+    def __init__(self, keysToKeep: list):
+        self.categorized = {}
+        self.keys = keysToKeep
+        
+    def categorizeLine(self, line: dict):
+        name = line["name"]
+        if name not in self.categorized:
+            self.categorized[name] = {}
+            for key in self.keys:
+                self.categorized[name][key] = []
+                
+        for key in self.keys:
+            self.categorized[name][key].append(line[key])
+
+    def items(self):
+        return self.categorized.items()
+#+END_SRC
+** pair
+#+BEGIN_SRC python :tangle ../source/pair.py
+class Pair:
+    def __init__(self, initial = None):
+        self.pair = [None, initial]
+        
+    def shift(self, new = None):
+        self.pair[0] = self.pair[1]
+        self.pair[1] = new
+
+    def offsetFromPrevious(self, offset):
+        self.pair[1] = self.pair[0] + offset
+                
+    @property
+    def current(self):
+        return self.pair[1]
+
+    @property
+    def previous(self):
+        return self.pair[0]
+
+    @property
+    def difference(self):
+        return self.pair[1] - self.pair[0]
+#+END_SRC
+
+** observer
+#+BEGIN_SRC python :tangle ../source/observer.py
+class Observer:
+    def onUpdateFromSubject(self, package):
+        pass
+
+    def onCloseFromSubject(self):
+        pass
+
+    
+class Subject:
+    def __init__(self):
+        self.observers = []
+
+    def addObserver(self, observer: Observer):
+        self.observers.append(observer)
+        
+    def notifyObservers(self, package):
+        for observer in self.observers:
+            observer.onUpdateFromSubject(package)
+
+    def closeObservers(self):
+        for observer in self.observers:
+            observer.onCloseFromSubject()
+#+END_SRC
+
+** terminal
+#+BEGIN_SRC python :tangle ../source/terminal.py
+import sys
+import observer
+
+class TerminalSubject(observer.Subject):
+    def __init__(self):
+        super(TerminalSubject, self).__init__()
+        self.terminalInput = open(sys.argv[1]) if len(sys.argv) > 1 else sys.stdin
+        
+    def startNotifying(self):
+        for line in self.terminalInput:
+            self.notifyObservers(line)
+        self.closeObservers()
+            
+class FileObserver(observer.Observer):
+    def __init__(self, fileName: str):
+        self.output = open(fileName, "w+")
+    
+    def onUpdateFromSubject(self, package: str):
+        self.output.write(package)
+        if not package.endswith('\n'):
+            self.output.write('\n')
+
+    def onCloseFromSubject(self):
+        self.output.close()
+        
+class StdoutObserver(observer.Observer):
+    def onUpdateFromSubject(self, package: str):
+        print(package)
+        
+#+END_SRC
+
+** COMMENT stream                                                :deprecated:
+#+BEGIN_SRC python :tangle ../source/stream.py :eval no-export
+import asyncio
+import ip
+
+class StreamSubscriber:
+    def update(self, packet: str):
+        pass
+
+    def shutdown(self):
+        pass
+
+class StreamPublisher:
+    def __init__(self):
+        self.subscribers = []
+        
+    def addSubscriber(self, subscriber: StreamSubscriber):
+        self.subscribers.append(subscriber)
+
+    def removeSubscriber(self, subscriber: StreamSubscriber):
+        self.subscribers.remove(subscriber)
+
+    def sendPacket(self):
+        for subscriber in self.subscribers:
+            subscriber.update(self.packet)
+
+    def sendShutdown(self):
+        for subscriber in self.subscribers:
+            subscriber.shutdown()
+
+    async def handler(self, reader, writer):
+        while not reader.at_eof():
+            self.packet = (await reader.readline()).decode('utf-8')
+            self.sendPacket()
+
+        self.sendShutdown()
+
+    async def start(self, port):
+        self.server = await asyncio.start_server(self.handler, ip.local(), port)
+        async with self.server:
+            await self.server.serve_forever()
+#+END_SRC
+** COMMENT ip                                                    :deprecated:
+#+BEGIN_SRC python :tangle ../source/ip.py
+import subprocess
+
+<<ip.local>>
+#+END_SRC
+
+#+name: ip.local
+#+BEGIN_SRC python
+def local():
+    command = 'ip addr | grep "global" | egrep -o "[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}" | head -n1'
+    process = subprocess.run(command, shell=True, check=True, encoding='utf-8', stdout=subprocess.PIPE)
+    ip = process.stdout.split()
+    if not ip: raise RuntimeError("No Network Connection")
+    return ip[0]
+#+END_SRC
+
+#+BEGIN_SRC python :eval no-export
+import ip
+print(ip.local())
+#+END_SRC
+
+#+RESULTS[9ab9e9195a7e776c05bb1649a5967ef8e84217de]:
+: 192.168.0.101
+
+* Scripts
+** applyKalman
+#+BEGIN_SRC python :tangle ../script/run_applyKalman.py
+<<include_source>>
+import sys
+import json
+import numpy
+import matplotlib.pyplot as pyplot
+import pykalman
+import pair
+import enum
+import datetime
+import fileinput
+
+import node
+import terminal
+import observer
+
+class State:
+    size = 9
+    dimensions = 3
+    
+    class Position(enum.IntEnum):
+        x, y, z = 0, 1, 2
+
+    class Velocity(enum.IntEnum):
+        x, y, z = 3, 4, 5
+
+    class Acceleration(enum.IntEnum):
+        x, y, z = 6, 7, 8
+        
+
+state = numpy.zeros(State.size)
+stateModel = numpy.eye(9)
+measurement = numpy.zeros(State.dimensions)
+measurementModel = numpy.hstack((numpy.zeros((State.dimensions, State.size-State.dimensions)), numpy.eye(State.dimensions)))
+stateVariance = 0 #numpy.eye(State.size)*0.0005
+measurementVariance = numpy.eye(State.dimensions)*0.0005
+processVariance = numpy.eye(State.size)
+
+
+# class KalmanNode(observer.Subject, observer.Observer):
+#     def __init__(self, state
+
+# terminalSubject = terminal.TerminalSubject()
+
+inputSubject = terminal.TerminalSubject()
+jsonLoadNode = node.JsonLoadNode()
+
+#handleNode = HandleNode(handlers = [LinearAccelerationHandler, QuaternionHandler])
+
+
+for sample in fileinput.input():
+    if fileinput.isfirstline():
+        initial = json.loads(sample)
+        seconds = TimePair(initial = initial["millis"]/1000)
+        acceleration = numpy.asarray(initial["values"])
+
+        if fileinput.isstdin():
+            output = sys.stdout
+        else:
+            output = open(f"output/fused_{sys.argv[1]}_on_{datetime.datetime.now():%Y-%m-%d_%H:%M:%S}", "w+")
+    else:
+        sensor = json.loads(sample)
+        seconds.shift(sensor["millis"]/1000)
+        measurement = numpy.asarray(sensor["values"])
+
+        first = numpy.eye(State.dimensions)*seconds.difference
+        second = numpy.eye(State.dimensions)*seconds.difference**2/2
+        stateModel[0:3,3:6] = first
+        stateModel[0:3,6:9] = second
+        stateModel[3:6,6:9] = first
+
+        state = stateModel.dot(state)
+        processVariance = stateModel.dot(processVariance).dot(stateModel.T) + stateVariance
+        s = measurementModel.dot(processVariance).dot(measurementModel.T) + measurementVariance
+        gain = processVariance.dot(measurementModel.T).dot(numpy.linalg.inv(s))
+        #gain = numpy.hstack((numpy.zeros((State.dimensions, State.size-State.dimensions)), numpy.eye(State.dimensions))).T
+
+        state = state + gain.dot(measurement - measurementModel.dot(state))
+        processVariance = processVariance - gain.dot(measurementModel).dot(processVariance)
+        
+        output.write(json.dumps({
+            "name": "Meters",
+            "millis": seconds.current,
+            "values": [state[State.Position.x],state[State.Position.y],state[State.Position.z]]}))
+        output.write('\n')
+        
+        output.write(json.dumps({
+            "name": "Meters/Seconds",
+            "millis": seconds.current,
+            "values": [state[State.Velocity.x],state[State.Velocity.y],state[State.Velocity.z]]}))
+        output.write('\n')
+        
+        output.write(json.dumps({
+            "name": "Meters/Second/Second",
+            "millis": seconds.current,
+            "values": [state[State.Acceleration.x],state[State.Acceleration.y],state[State.Acceleration.z]]}))
+        output.write('\n')
+        
+output.close()
+
+
+
+
+
+
+
+
+
+#+END_SRC
+** record
+#+BEGIN_SRC python :tangle ../script/record.py
+<<include_source>>
+import terminal
+import datetime
+import os
+
+timeOfRecording = f"{datetime.datetime.now():%Y-%m-%d_%H:%M:%S}"
+os.makedirs("output/" + timeOfRecording)
+
+terminalSubject = terminal.TerminalSubject()
+stdoutObserver = terminal.StdoutObserver()
+fileObserver = terminal.FileObserver(f"output/{timeOfRecording}/raw")
+
+terminalSubject.addObserver(stdoutObserver)
+terminalSubject.addObserver(fileObserver)
+terminalSubject.startNotifying()
+#+END_SRC
+** plot
+#+BEGIN_SRC python :tangle ../script/plot.py
+import matplotlib.pyplot as pyplot
+import json
+import sys
+import re
+
+class SensorPlotable:
+    def __init__(self):
+        self.values = []
+        self.seconds = []
+
+    def update(self, seconds: float, values: list):
+        self.values.append(values)
+        self.seconds.append(seconds)
+        
+
+class SensorPlotableManager:
+    def __init__(self, title: str):
+        self.sensors = {}
+        self.title = title
+        
+    def update(self, name: str, seconds: float, values: list):
+        if name not in self.sensors:
+            self.sensors[name] = SensorPlotable()
+        self.sensors[name].update(seconds, values)
+
+    def plotAll(self):
+        figure, axes = pyplot.subplots(nrows = len(self.sensors), squeeze = False, sharex = True)
+        
+        axes[0, 0].set_title(self.title)
+        axes[len(self.sensors)-1, 0].set_xlabel("time (ms)")
+        
+        for i, (name, plotable) in enumerate(self.sensors.items()):
+            axes[i, 0].set_ylabel(name)
+            axes[i, 0].plot([i-plotable.seconds[0] for i in plotable.seconds], plotable.values)
+                
+        figure.tight_layout()
+        pyplot.show()
+
+        
+manager = SensorPlotableManager(title = re.sub("^.*/", "", sys.argv[1]))
+with open(sys.argv[1]) as jsonFile:
+    for line in jsonFile:
+        sample = json.loads(line)
+        manager.update(sample["name"], sample["millis"], sample["values"])
+
+manager.plotAll()
+#+END_SRC
+
+** variance
+#+BEGIN_SRC python :tangle ../script/variance.py
+<<include_source>>
+import sys
+import os
+import numpy
+import terminal
+import observer
+import encoder
+import node
+import strategy
+import splitter
+
+inputSubject = terminal.TerminalSubject()
+jsonLoadNode = node.JsonLoadNode()
+
+varianceNode = node.StrategyNode(strategy.VarianceStrategy(initial = numpy.zeros(3)))
+#splitter = splitter.SplitterBranchReplicator(headOfBranch = varianceNode)
+#varianceNodeA = node.StrategyNode(strategy.VarianceStrategy(initial = numpy.zeros(3)))
+#varianceNodeB = node.StrategyNode(strategy.VarianceStrategy(initial = numpy.zeros(3)))
+#splitter.addNamedNode("MPL Accelerometer", varianceNodeA)
+#splitter.addNamedNode("MPL Gyroscope", varianceNodeB)
+
+jsonDumpNode = node.JsonDumpNode(jsonEncoder = encoder.NumpyEncoder)
+fileObserver = terminal.FileObserver(f"{os.path.dirname(sys.argv[1])}/variance")
+stdoutObserver = terminal.StdoutObserver()
+
+inputSubject.addObserver(jsonLoadNode)
+jsonLoadNode.addObserver(splitter.SplitterBranchReplicator(headOfBranch = varianceNode))
+varianceNode.addObserver(jsonDumpNode)
+#varianceNodeA.addObserver(jsonDumpNode)
+#varianceNodeB.addObserver(jsonDumpNode)
+jsonDumpNode.addObserver(fileObserver)
+jsonDumpNode.addObserver(stdoutObserver)
+
+inputSubject.startNotifying()
+
+        
+# inputSubject = terminal.TerminalSubject()
+# jsonLoadNode = node.JsonLoadNode()
+# varianceNode = node.StrategyNode(strategy.VarianceStrategy(initial = numpy.zeros(3)))
+# jsonDumpNode = node.JsonDumpNode(jsonEncoder = encoder.NumpyEncoder)
+# fileObserver = terminal.FileObserver(f"{os.path.dirname(sys.argv[1])}/variance")
+# stdoutObserver = terminal.StdoutObserver()
+
+# inputSubject.addObserver(jsonLoadNode)
+# jsonLoadNode.addObserver(varianceNode)
+# varianceNode.addObserver(jsonDumpNode)
+# jsonDumpNode.addObserver(fileObserver)
+# jsonDumpNode.addObserver(stdoutObserver)
+
+# inputSubject.startNotifying()
+#+END_SRC
+** COMMENT streamServer(Log & File)                              :deprecated:
+#+BEGIN_SRC python :tangle ../script/run_streamServer.py
+<<include_source>>
+import asyncio
+import stream
+import datetime
+
+class LogStreamSubscriber(stream.StreamSubscriber):
+    def update(self, packet: str):
+        print(packet)
+
+class FileStreamSubscriber(stream.StreamSubscriber):
+    def __init__(self, file: str):
+        self.output = open(file, "w+")
+        
+    def update(self, packet: str):
+        self.output.write(packet)
+
+        
+jsonStream = stream.StreamPublisher()
+subscriber = {
+    "log": LogStreamSubscriber(),
+    "csv": FileStreamSubscriber(file = f"output/{datetime.datetime.now():%Y-%m-%d_%H:%M:%S}")
+}
+
+jsonStream.addSubscriber(subscriber["log"])
+jsonStream.addSubscriber(subscriber["csv"])
+
+try:
+    asyncio.run(jsonStream.start(port = 11772))
+except KeyboardInterrupt:
+    sys.exit(0)
+#+END_SRC
+* Scrap
+** Fusing with Nested Class Observers                                :T712_1:
+#+BEGIN_SRC python
+import quaternion
+
+class OrientedVectorNode:
+    def __init__(self, quaternionState, vectorState):
+        self.subject = Subject() #TODO dependency injection
+        self.quaternionObserver = self.QuaternionObserver()
+        self.vectorObserver = self.VectorObserver()
+
+    class QuaternionObserver(observer.Observer):
+        def onUpdateFromSubject(self, package):
+            self.quaternion = 
+
+    class VectorObserver(observer.Observer):
+        def onUpdateFromSubject(self, package):
+
+        
+#+END_SRC
+** alias matrix variable
+#+BEGIN_SRC python :eval no-export
+import numpy
+import enum
+
+class State(enum.IntEnum):
+    position = 0
+    velocity = 1
+    
+state = numpy.array([1, 2])
+velocity = state[1]
+position = state[0]
+print("pos:", state[State.position])
+print("vel:", state[State.velocity])
+
+state[1] = 4
+print("pos:", state[State.position])
+print("vel:", state[State.velocity])
+#+END_SRC
+
+#+RESULTS[4799896116125a2a317139001fa4e057c69bf34c]:
+: pos: 1
+: vel: 2
+: pos: 1
+: vel: 4
+** plane tracking (kalman)
+#+BEGIN_SRC python :eval no-export
+import numpy as np
+from numpy.linalg import inv
+
+x_observations = np.array([4000, 4260, 4550, 4860, 5110])
+v_observations = np.array([280, 282, 285, 286, 290])
+
+z = np.c_[x_observations, v_observations]
+
+# Initial Conditions
+a = 2  # Acceleration
+v = 280
+t = 1  # Difference in time
+
+# Process / Estimation Errors
+error_est_x = 20
+error_est_v = 5
+
+# Observation Errors
+error_obs_x = 25  # Uncertainty in the measurement
+error_obs_v = 6
+
+def prediction2d(x, v, t, a):
+    A = np.array([[1, t],
+                  [0, 1]])
+    X = np.array([[x],
+                  [v]])
+    B = np.array([[0.5 * t ** 2],
+                  [t]])
+    X_prime = A.dot(X) + B.dot(a)
+    return X_prime
+
+
+def covariance2d(sigma1, sigma2):
+    cov1_2 = sigma1 * sigma2
+    cov2_1 = sigma2 * sigma1
+    cov_matrix = np.array([[sigma1 ** 2, cov1_2],
+                           [cov2_1, sigma2 ** 2]])
+    return np.diag(np.diag(cov_matrix))
+
+
+# Initial Estimation Covariance Matrix
+P = covariance2d(error_est_x, error_est_v)
+A = np.array([[1, t],
+              [0, 1]])
+
+# Initial State Matrix
+X = np.array([[z[0][0]],
+              [v]])
+n = len(z[0])
+
+for data in z[1:]:
+    X = prediction2d(X[0][0], X[1][0], t, a)
+    # To simplify the problem, professor
+    # set off-diagonal terms to 0.
+    P = np.diag(np.diag(A.dot(P).dot(A.T)))
+
+    # Calculating the Kalman Gain
+    H = np.identity(n)
+    R = covariance2d(error_obs_x, error_obs_v)
+    S = H.dot(P).dot(H.T) + R
+    K = P.dot(H).dot(inv(S))
+
+    # Reshape the new data into the measurement space.
+    Y = H.dot(data).reshape(n, -1)
+
+    # Update the State Matrix
+    # Combination of the predicted state, measured values, covariance matrix and Kalman Gain
+    X = X + K.dot(Y - H.dot(X))
+
+    # Update Process Covariance Matrix
+    P = (np.identity(len(K)) - K.dot(H)).dot(P)
+    print("X:", X)
+    print("P:", P)
+
+print("Kalman Filter State Matrix:\n", X)
+#+END_SRC
+
+#+RESULTS[563ec8fbda592c500f687496fc37cc4a01753429]:
+#+begin_example
+X: [[4272.5]
+ [ 282. ]]
+P: [[252.97619048   0.        ]
+ [  0.          14.75409836]]
+X: [[4553.85054707]
+ [ 284.29069767]]
+P: [[187.4378327    0.        ]
+ [  0.          10.46511628]]
+X: [[4844.15764332]
+ [ 286.22522523]]
+P: [[150.30854278   0.        ]
+ [  0.           8.10810811]]
+X: [[5127.05898493]
+ [ 288.55147059]]
+P: [[126.38282157   0.        ]
+ [  0.           6.61764706]]
+Kalman Filter State Matrix:
+ [[5127.05898493]
+ [ 288.55147059]]
+#+end_example
+
+** numpy ndarray
+#+BEGIN_SRC python :eval no-export
+import numpy
+
+A = numpy.eye(6)
+A[0:3, 3:6] = 2*numpy.eye(3)
+#A = numpy.hstack((numpy.array([*numpy.eye(3), *numpy.eye(3)*2]), numpy.array([*numpy.zeros([3,3]), *numpy.eye(3)])))
+print(A)
+#+END_SRC
+
+#+RESULTS[c2fea3356f7ba157f983b21c8e180a9c84903dec]:
+: [[1. 0. 0. 2. 0. 0.]
+:  [0. 1. 0. 0. 2. 0.]
+:  [0. 0. 1. 0. 0. 2.]
+:  [0. 0. 0. 1. 0. 0.]
+:  [0. 0. 0. 0. 1. 0.]
+:  [0. 0. 0. 0. 0. 1.]]
+
+** transpose 3x9
+#+BEGIN_SRC python :eval no-export
+import numpy
+H = numpy.hstack((numpy.zeros((3, 6)), numpy.eye(3)))
+print(H)
+print(H.T);
+
+#+END_SRC
+
+#+RESULTS[990d6266bc08304c4e82ce6ea39ec984e1ae8318]:
+#+begin_example
+[[0. 0. 0. 0. 0. 0. 1. 0. 0.]
+ [0. 0. 0. 0. 0. 0. 0. 1. 0.]
+ [0. 0. 0. 0. 0. 0. 0. 0. 1.]]
+[[0. 0. 0.]
+ [0. 0. 0.]
+ [0. 0. 0.]
+ [0. 0. 0.]
+ [0. 0. 0.]
+ [0. 0. 0.]
+ [1. 0. 0.]
+ [0. 1. 0.]
+ [0. 0. 1.]]
+#+end_example
+
+** stdin read continuously
+#+BEGIN_SRC python :tangle ../scrap/run_stdinLoop.py
+import sys
+
+for line in sys.stdin:
+    print(line)
+#+END_SRC
+
+** subject/observer
+#+BEGIN_SRC python :tangle ../scrap/test_stdinToStdout.py
+<<include_source>>
+import terminal
+s = terminal.TerminalSubject()
+o = terminal.StdoutObserver()
+s.addObserver(o)
+s.startNotifying()
+#+END_SRC
+
+#+BEGIN_SRC python :tangle ../scrap/test_stdinToFile.py
+<<include_source>>
+import terminal
+import sys
+s = terminal.TerminalSubject()
+o = terminal.FileObserver(f"{sys.argv[0]}_output")
+s.addObserver(o)
+s.startNotifying()
+#+END_SRC
+
+** quaternion hamiltonian product
+#+BEGIN_SRC python :eval no-export
+import numpy
+w1 = 1
+w2 = 10
+a = numpy.array([1, 2, 3])
+b = numpy.array([2, 3, 4])
+c = a*b
+print(w1*w2-sum(c))
+
+print(sum(a**2))
+
+#+END_SRC
+
+#+RESULTS[e19a4225ef6cb94074f406f493ba41c941abb820]:
+: -10
+: 14
+
+* Other
+#+name: include_source
+#+BEGIN_SRC python
+import sys
+sys.path.append("../source")
+#+END_SRC
