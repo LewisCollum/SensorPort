@@ -1,8 +1,9 @@
 import pair 
+import abc
 
-class Strategy:
-    def execute(self, input):
-        pass
+class Strategy(abc.ABC):
+    @abc.abstractmethod
+    def execute(self, input): pass
             
 class VarianceStrategy(Strategy):
     def __init__(self, initial):

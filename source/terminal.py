@@ -1,28 +1,40 @@
 import sys
 import observer
+import base
 
-class TerminalSubject(observer.Subject):
-    def __init__(self):
-        super(TerminalSubject, self).__init__()
+class TerminalDistributor:
+    def __init__(self, distributor: base.Distributor):
+        self.distributor = distributor
         self.terminalInput = open(sys.argv[1]) if len(sys.argv) > 1 else sys.stdin
+
+    def connectToHandler(self, handler: base.Handler):
+        self.distributor.connectToHandler(handler)
         
-    def startNotifying(self):
+    def startDistributing(self):
         for line in self.terminalInput:
-            self.notifyObservers(line)
-        self.closeObservers()
-            
-class FileObserver(observer.Observer):
+            self.distributor.distribute(line)
+        self.distributor.disconnectHandlers()
+
+
+class FileWriter(base.Handler):
     def __init__(self, fileName: str):
+        self.fileName = fileName
+
+    def onConnected(self):
         self.output = open(fileName, "w+")
     
-    def onUpdateFromSubject(self, package: str):
+    def onReceivedPackage(self, package: str):
         self.output.write(package)
         if not package.endswith('\n'):
             self.output.write('\n')
 
-    def onCloseFromSubject(self):
+    def onDisconnected(self):
         self.output.close()
-        
-class StdoutObserver(observer.Observer):
+    
+
+class StdoutWriter(base.Handler):
     def onUpdateFromSubject(self, package: str):
-        print(package)
+        print(package)        
+
+    def onConnected(self): pass
+    def onDisconnected(self): pass

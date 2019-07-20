@@ -1,38 +1,38 @@
-import observer
-import categorizer as cat
 import strategy
 import json
+import abc
+import distributor
+import handler
 
-class CategoryNode(observer.Observer, observer.Subject):
-    def __init__(self, categorizer: cat.Categorizer):
-        super(CategoryNode, self).__init__()
-        self.categorizer = categorizer
-        
-    def onUpdateFromSubject(self, package: str):
-        self.categorizer.categorizeLine(line = json.loads(package))
+class Node(handler.Handler): 
+    def __init__(self, distributor: distributor.Distributor):
+        self.distributor = distributor
 
-    def onCloseFromSubject(self):
-        self.notifyObservers(self.categorizer.categorized)
+    def onReceivedPackage(self, package):
+        self.distributor.distribute(self.handlePackage(package))
 
-class StrategyNode(observer.Observer, observer.Subject):
-    def __init__(self, strategy: strategy.Strategy):
-        super(StrategyNode, self).__init__()
+    @abc.abstractmethod
+    def handlePackage(self, package): pass
+    
+
+class StrategyNode(Node):
+    def __init__(self, distributor: distributor.Distributor, strategy: strategy.Strategy):
+        super(StrategyNode, self).__init__(distributor)
         self.strategy = strategy
 
-    def onUpdateFromSubject(self, package):
-        self.package = package
-        self.package["values"] = self.strategy.execute(input = package["values"])
+    def handlePackage(self, package):
+        package["values"] = self.strategy.execute(input = package["values"])
         package.setdefault("strategies", []).append(self.strategy.__class__.__name__)
-        self.notifyObservers(self.package)
+        return package
 
-class JsonLoadNode(observer.Observer, observer.Subject):
-    def onUpdateFromSubject(self, package):
-        self.notifyObservers(json.loads(package))
+class JsonLoadNode(Node):
+    def handlePackage(self, package):
+        return json.loads(package)
 
-class JsonDumpNode(observer.Observer, observer.Subject):
-    def __init__(self, jsonEncoder = None):
-        super(JsonDumpNode, self).__init__()
+class JsonDumpNode(Node):
+    def __init__(self, distributor: distributor.Distributor, jsonEncoder = None):
+        super(JsonDumpNode, self).__init__(distributor)
         self.jsonEncoder = jsonEncoder
 
-    def onUpdateFromSubject(self, package):
-        self.notifyObservers(package=json.dumps(package, cls = self.jsonEncoder))
+    def handlePackage(self, package):
+        return json.dumps(package, cls = self.jsonEncoder)
