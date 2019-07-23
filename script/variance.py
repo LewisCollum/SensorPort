@@ -33,19 +33,3 @@ jsonDumpNode.addObserver(fileObserver)
 jsonDumpNode.addObserver(stdoutObserver)
 
 inputSubject.startNotifying()
-
-        
-# inputSubject = terminal.TerminalSubject()
-# jsonLoadNode = node.JsonLoadNode()
-# varianceNode = node.StrategyNode(strategy.VarianceStrategy(initial = numpy.zeros(3)))
-# jsonDumpNode = node.JsonDumpNode(jsonEncoder = encoder.NumpyEncoder)
-# fileObserver = terminal.FileObserver(f"{os.path.dirname(sys.argv[1])}/variance")
-# stdoutObserver = terminal.StdoutObserver()
-
-# inputSubject.addObserver(jsonLoadNode)
-# jsonLoadNode.addObserver(varianceNode)
-# varianceNode.addObserver(jsonDumpNode)
-# jsonDumpNode.addObserver(fileObserver)
-# jsonDumpNode.addObserver(stdoutObserver)
-
-# inputSubject.startNotifying()

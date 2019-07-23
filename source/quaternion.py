@@ -1,7 +1,9 @@
+import copy
+
 class Quaternion:
     normalizingStrategy = None
     
-    def __init__(self, vector, scalar: float):        
+    def __init__(self, vector, scalar):        
         self.vector = vector
         self.scalar = scalar
         
@@ -11,7 +13,7 @@ class Quaternion:
         return resultantQuaternion.vector
         
     def conjugate(self):
-        conjugatedVector = -self.vector.copy()
+        conjugatedVector = self.vector.__class__((-i for i in self.vector))
         return Quaternion(vector=conjugatedVector, scalar=self.scalar)
         
     def __mul__(self, other):

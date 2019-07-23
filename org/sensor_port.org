@@ -4,13 +4,16 @@
 #+title: Sensor Port 
 #+author: Lewis Collum
 
-*** Tasks [0/4]
-**** IN-PROGRESS Nodes need to handle multiple inputs                :T712_1:
-**** TODO Nodes with feedback capabilities                           :T712_2:
+*** Tasks [2/6]
+**** DONE Nodes need to handle multiple inputs                       :T712_1:
+	 CLOSED: [2019-07-21 Sun 00:13]
+**** DONE Nodes with feedback capabilities                           :T712_2:
+	 CLOSED: [2019-07-21 Sun 00:13] Joiners allow feedback
 **** TODO Kalman Expectation Maximization algorithm for covariance matrices :T715_1:
 **** TODO Extract input type from TerminalDistributor then make a Factory for deciding input type :T719_1:terminal:
 **** TODO Extract ~package.setdefault("strategies", []).append(self.strategy.__class__.__name__~ from =node= :T720_1:node:
-
+**** TODO Allow user to choose what type of buffering he wants in Joiner :T721_1:joiner:
+	 - ~self.joinables = dict.fromkeys(self.joinables)~ clears the "buffer".
 * Modules
 ** handler
 *** source
@@ -86,31 +89,7 @@ class SingleDistributor(Distributor):
 
     def disconnect(self):
         self.handler.onDisconnected()
-        self.handler = None
-
-
-class AssociativeDistributor(Distributor):
-    @abc.abstractmethod
-    def connect(self, name: str, handler: handler.Handler): pass
-    
-        
-class KeyDistributor(AssociativeDistributor):
-    def __init__(self):
-        self.handlers = {}
-
-    def connect(self, name: str, handler: handler.Handler):
-        self.handlers.setdefault(name, []).append(handler)
-        handler.onConnected()
-        
-    def distribute(self, package):
-        for handler in self.handlers[package["name"]]:
-            handler.onReceivedPackage(package)
-
-    def disconnect(self):
-        for name, handlers in self.handlers.items():
-            for handler in handlers:
-                handler.onDisconnected()
-        self.handlers.clear()    
+        self.handler = None   
 #+END_SRC
 *** test
 #+BEGIN_SRC python :tangle ../source/test_distributor.py
@@ -166,31 +145,6 @@ class TestMultiDistributor(unittest.TestCase):
 
         self.assertTrue(self.handlerA.wasDisconnected)
         self.assertTrue(self.handlerB.wasDisconnected)
-
-        
-class TestKeyDistributor(unittest.TestCase):
-    def setUp(self):
-        self.unitName = "A"
-        self.unitHandler = mock_handler.MockHandler()
-
-        self.distributor = distributor.KeyDistributor()
-        self.distributor.connect(self.unitName, self.unitHandler)
-        
-    def test_distributeToMultipleHandlers(self):
-        expected = {"name": self.unitName}
-        self.distributor.distribute(expected)
-
-        actual = self.unitHandler.package
-        
-        self.assertEqual(actual, expected)
-        
-    def test_connectToHandlers(self):
-        self.assertTrue(self.unitHandler.wasConnected)
-        
-    def test_disconnectFromHandlers(self):
-        self.distributor.disconnect()
-
-        self.assertTrue(self.unitHandler.wasDisconnected)
         
 if __name__ == '__main__':
     unittest.main()
@@ -204,12 +158,49 @@ class MockDistributor(distributor.Distributor):
     def connect(self, handler: handler.Handler): self.handler = handler
     def distribute(self, package): self.handler.onReceivedPackage(package)
     def disconnect(self): pass
+#+END_SRC
+** terminal
+*** source
+#+BEGIN_SRC python :tangle ../source/terminal.py
+import sys
+import handler
+import distributor as d
+class TerminalDistributor:
+    def __init__(self, distributor: d.Distributor):
+        self.distributor = distributor
+        self.terminalInput = open(sys.argv[1]) if len(sys.argv) > 1 else sys.stdin
 
-class MockAssociativeDistributor(distributor.AssociativeDistributor):
-    def __init__(self): self.handler = {}
-    def connect(self, name: str, handler: handler.Handler): self.handler[name] = handler
-    def distribute(self, package): self.handler[package["name"]].onReceivedPackage(package)
-    def disconnect(self): pass
+    def connect(self, handler: handler.Handler):
+        self.distributor.connect(handler)
+        
+    def startDistributing(self):
+        for line in self.terminalInput:
+            self.distributor.distribute(line)
+        self.distributor.disconnect()
+
+
+class FileWriter(handler.Handler):
+    def __init__(self, fileName: str):
+        self.fileName = fileName
+
+    def onConnected(self):
+        self.output = open(self.fileName, "w+")
+    
+    def onReceivedPackage(self, package: str):
+        self.output.write(package)
+        if not package.endswith('\n'):
+            self.output.write('\n')
+
+    def onDisconnected(self):
+        self.output.close()
+    
+
+class StdoutWriter(handler.Handler):
+    def onReceivedPackage(self, package: str):
+        print(package)        
+
+    def onConnected(self): pass
+    def onDisconnected(self): pass
 #+END_SRC
 ** node
 *** source
@@ -219,6 +210,7 @@ import json
 import abc
 import distributor
 import handler
+import package as pk
 
 class Node(handler.Handler): 
     def __init__(self, distributor: distributor.Distributor):
@@ -229,7 +221,7 @@ class Node(handler.Handler):
 
     @abc.abstractmethod
     def handlePackage(self, package): pass
-    
+
 
 class StrategyNode(Node):
     def __init__(self, distributor: distributor.Distributor, strategy: strategy.Strategy):
@@ -237,14 +229,16 @@ class StrategyNode(Node):
         self.strategy = strategy
 
     def handlePackage(self, package):
-        package["values"] = self.strategy.execute(input = package["values"])
-        package.setdefault("strategies", []).append(self.strategy.__class__.__name__)
+        package.values = self.strategy.execute(input = package.values)
         return package
 
 class JsonLoadNode(Node):
     def handlePackage(self, package):
         return json.loads(package)
 
+    def onConnected(self): pass
+    def onDisconnected(self): pass
+    
 class JsonDumpNode(Node):
     def __init__(self, distributor: distributor.Distributor, jsonEncoder = None):
         super(JsonDumpNode, self).__init__(distributor)
@@ -253,13 +247,25 @@ class JsonDumpNode(Node):
     def handlePackage(self, package):
         return json.dumps(package, cls = self.jsonEncoder)
 
+    def onConnected(self): pass
+    def onDisconnected(self): pass
+
+class PackagingNode(Node):
+    def handlePackage(self, package: dict):
+        return pk.Package(package)
+
+    def onConnected(self): pass
+    def onDisconnected(self): pass
 #+END_SRC
 *** test
 #+BEGIN_SRC python :tangle ../source/test_node.py
 import unittest
 import mock_distributor
+import mock_associative_distributor
 import mock_node
 import mock_handler
+import mock_package
+import package
 
 class TestNode(unittest.TestCase):
     def setUp(self):
@@ -279,26 +285,6 @@ class TestNode(unittest.TestCase):
         
         self.assertEqual(actualPackage, package)
 
-        
-class TestAssociativeNode(unittest.TestCase):
-    def setUp(self):
-        self.packageDistributor = mock_distributor.MockDistributor()
-        self.nodeDistributor = mock_distributor.MockAssociativeDistributor()
-        self.node = mock_node.MockNode(distributor = self.nodeDistributor)
-        self.packageReceiver = mock_handler.MockHandler()
-
-        self.packageDistributor.connect(self.node)
-        self.nodeDistributor.connect("A", self.packageReceiver)
-
-    def test_packageReceivedFromDistributor(self):
-        package = {"name": "A"}
-        self.packageDistributor.distribute(package)
-
-        actualPackage = self.packageReceiver.package
-        
-        self.assertEqual(actualPackage, package)
-
-
 if __name__ == '__main__':
     unittest.main()
 #+END_SRC
@@ -308,50 +294,6 @@ import node
 
 class MockNode(node.Node):
     def handlePackage(self, package): return package
-    def onConnected(self): pass
-    def onDisconnected(self): pass
-#+END_SRC
-** terminal
-*** source
-#+BEGIN_SRC python :tangle ../source/terminal.py
-import sys
-import observer
-import base
-
-class TerminalDistributor:
-    def __init__(self, distributor: base.Distributor):
-        self.distributor = distributor
-        self.terminalInput = open(sys.argv[1]) if len(sys.argv) > 1 else sys.stdin
-
-    def connectToHandler(self, handler: base.Handler):
-        self.distributor.connectToHandler(handler)
-        
-    def startDistributing(self):
-        for line in self.terminalInput:
-            self.distributor.distribute(line)
-        self.distributor.disconnectHandlers()
-
-
-class FileWriter(base.Handler):
-    def __init__(self, fileName: str):
-        self.fileName = fileName
-
-    def onConnected(self):
-        self.output = open(fileName, "w+")
-    
-    def onReceivedPackage(self, package: str):
-        self.output.write(package)
-        if not package.endswith('\n'):
-            self.output.write('\n')
-
-    def onDisconnected(self):
-        self.output.close()
-    
-
-class StdoutWriter(base.Handler):
-    def onUpdateFromSubject(self, package: str):
-        print(package)        
-
     def onConnected(self): pass
     def onDisconnected(self): pass
 #+END_SRC
@@ -389,33 +331,447 @@ class MockStrategy(strategy.Strategy):
     def execute(self, input):
         return input
 #+END_SRC
+** package
+*** source
+#+BEGIN_SRC python :tangle ../source/package.py
+import abc 
+
+class PackageConfig:
+    name = "name"
+    value = "value"
+    timestamp = "timestamp"
+    
+class Package:
+    def __init__(self, package: dict):
+        self.package = package
+
+    @property
+    def name(self):
+        return self.package[PackageConfig.name]
+        
+    @property
+    def value(self):
+        return self.package[PackageConfig.value]
+    
+    @value.setter
+    def value(self, value):
+        self.package[PackageConfig.value] = value
+
+    @property
+    def timestamp(self):
+        return self.package[PackageConfig.timestamp]
+    
+    @classmethod
+    def make(cls, name: str = None, timestamp: int = None, value = None):
+        return cls({PackageConfig.name: name, PackageConfig.value: value, PackageConfig.timestamp: timestamp})
+
+    @classmethod
+    def nameFromPackage(cls, package):
+        return package.name
+    
+    @classmethod
+    def valueFromPackage(cls, package):
+        return package.value
+
+    @classmethod
+    def timestampFromPackage(cls, package):
+        return package.timestamp
+    
+    
+class PackageValue(abc.ABC):
+    containerClass = tuple
+    
+    def __init__(self, values):
+        self.values = values
+        
+    @classmethod
+    def fromContainer(cls, values):
+        if values.__class__ == PackageValue.containerClass:
+            return cls(values) 
+        return cls(cls.containerClass(values))
+#+END_SRC
+*** mock
+#+BEGIN_SRC python :tangle ../source/mock_package.py
+import package as pk
+
+class MockPackageValue(pk.PackageValue):
+    @classmethod
+    def fromContainer(cls, container): pass
+#+END_SRC
+** package_imu
+*** source
+#+BEGIN_SRC python :tangle ../source/package_imu.py
+import package as pk
+
+class Vector3D(pk.PackageValue):
+    @property
+    def x(self):
+        return self.values[0]
+    
+    @property
+    def y(self):
+        return self.values[1]
+    
+    @property
+    def z(self):
+        return self.values[2]
+            
+    @classmethod
+    def fromComponents(cls, x, y, z):
+        return cls.fromContainer(values = (x, y, z))
+    
+
+class Quaternion(pk.PackageValue):
+    @property
+    def vector(self):
+        return self.values[0:3]
+
+    @property
+    def scalar(self):
+        return self.values[3]
+        
+    @classmethod
+    def fromComponents(cls, x, y, z, scalar):
+        vector = Vector3D.fromComponents(x, y, z)
+        return cls.fromContainer(values = (x, y, z, scalar))
+#+END_SRC
+*** test
+#+BEGIN_SRC python :tangle ../source/test_package_imu.py
+import package as pk
+import package_imu as pk_imu
+import unittest
+
+class TestVector3D(unittest.TestCase):
+    def setUp(self):
+        self.expected = (1, 2, 3)
+        
+    def test_fromContainer_vectorMatches(self):
+        vector = pk_imu.Vector3D.fromContainer(self.expected)
+
+        self.assertEqual(self.expected, vector.values)
+
+    def test_fromComponents_vectorMatches(self):
+        x, y, z = self.expected
+        vector = pk_imu.Vector3D.fromComponents(x, y, z)
+
+        self.assertEqual(self.expected, vector.values)
+
+
+class TestQuaternion(unittest.TestCase):
+    def setUp(self):
+        self.expected = (1, 2, 3, 0)
+
+    def test_fromContainer_valuesMatch(self):
+        quaternion = pk_imu.Quaternion.fromContainer(self.expected)
+
+        self.assertEqual(self.expected, quaternion.values)
+        
+    def test_fromComponents_valuesMatch(self):
+        x, y, z, scalar = self.expected
+        quaternion = pk_imu.Quaternion.fromComponents(x, y, z, scalar)
+
+        self.assertEqual(self.expected, quaternion.values)
+
+if __name__ == '__main__':
+    unittest.main()
+#+END_SRC
+** associative_distributor
+*** source
+#+BEGIN_SRC python :tangle ../source/associative_distributor.py
+import distributor
+import handler
+import abc
+import package as pk
+
+class AssociativeDistributor(distributor.Distributor):
+    @abc.abstractmethod
+    def connect(self, name: str, handler: handler.Handler): pass
+    
+        
+class KeyDistributor(AssociativeDistributor):
+    def __init__(self):
+        self.handlers = {}
+
+    def connect(self, name: str, handler: handler.Handler):
+        self.handlers.setdefault(name, []).append(handler)
+        handler.onConnected()
+        
+    def distribute(self, package):
+        for handler in self.handlers[package.name]:
+            handler.onReceivedPackage(package)
+
+    def disconnect(self):
+        for name, handlers in self.handlers.items():
+            for handler in handlers:
+                handler.onDisconnected()
+        self.handlers.clear()    
+#+END_SRC
+*** test
+#+BEGIN_SRC python :tangle ../source/test_associative_distributor.py
+import unittest
+import associative_distributor
+import mock_handler
+import mock_package as mock_pk
+import package as pk
+
+class TestKeyDistributor(unittest.TestCase):
+    def setUp(self):
+        self.distributor = associative_distributor.KeyDistributor()
+        self.handler = mock_handler.MockHandler()
+
+        self.distributor.connect("A", self.handler)
+        
+    def test_distributeToMultipleHandlers(self):
+        expectedPackage = pk.Package.make(name = "A")
+        self.distributor.distribute(expectedPackage)
+
+        actualPackage = self.handler.package
+        
+        self.assertEqual(actualPackage, expectedPackage)
+        
+    def test_connectToHandlers(self):
+        self.assertTrue(self.handler.wasConnected)
+        
+    def test_disconnectFromHandlers(self):
+        self.distributor.disconnect()
+
+        self.assertTrue(self.handler.wasDisconnected)
+
+
+if __name__ == '__main__':
+    unittest.main()
+#+END_SRC
+*** mock
+#+BEGIN_SRC python :tangle ../source/mock_associative_distributor.py
+import associative_distributor
+import handler
+import package as pk
+
+class MockAssociativeDistributor(associative_distributor.AssociativeDistributor):
+    def __init__(self): self.handler = {}
+    def connect(self, name: str, handler: handler.Handler): self.handler[name] = handler
+    def distribute(self, package): self.handler[package.name].onReceivedPackage(package)
+    def disconnect(self): pass
+#+END_SRC
 ** splitter
 *** source
 #+BEGIN_SRC python :tangle ../source/splitter.py
 import handler
 import node
-import distributor
+import associative_distributor as ad
+import package as pk
 
-class Splitter(node.AssociativeNode):
-    def __init__(self, distributor: distributor.AssociativeDistributor):
-        super(Splitter, self).__init__(distributor)
-
+class Splitter(node.Node):
     def handlePackage(self, package): return package
+    def onConnected(self): pass
+    def onDisconnected(self): pass
 
-# class Splitter(handler.Handler):
-#     def __init__(self):
-#         self.nodes = {}
+class PackageSplitter(node.Node):
+    def __init__(self, distributor: ad.AssociativeDistributor):
+        super(PackageSplitter, self).__init__(distributor)
+        self.packageClasses = {}
         
-#     def addNamedNode(self, name: str, node: node.Node):
-#         self.nodes[name] = node
+    def handlePackage(self, package):
+        package = pk.Package(package)
+        package.value = self.packageClasses[package.name](package.value)
+        return package
 
-#     def hasNamedNode(self, name: str):
-#         return name in self.nodes
+    def addPackageClass(self, name: str, cls: pk.PackageValue):
+        self.packageClasses[name] = cls
         
-#     def onReceivedPackage(self, package):
-#         self.nodes[package["name"]].onReceivedPackage(package)
+    def onConnected(self): pass
+    def onDisconnected(self): pass
+    
 #+END_SRC
 *** test
+#+BEGIN_SRC python :tangle ../source/test_splitter.py
+import unittest
+import splitter
+import mock_associative_distributor as mock_ad
+import mock_distributor as mock_d
+import mock_handler
+import package as pk
+import mock_package as mock_pk
+
+class TestSplitter(unittest.TestCase):
+    def setUp(self):
+        self.A = mock_handler.MockHandler()
+        self.B = mock_handler.MockHandler()
+
+        self.distributor = mock_ad.MockAssociativeDistributor()
+        self.distributor.connect("A", self.A)
+        self.distributor.connect("B", self.B)
+
+        self.packageDistributor = mock_d.MockDistributor()
+        self.splitter = splitter.Splitter(self.distributor)
+        self.packageDistributor.connect(self.splitter)        
+        
+    def test_distribute_packageSentToANotB(self):
+        packageForA = pk.Package.make(name = "A")
+        self.packageDistributor.distribute(packageForA)
+
+        self.assertEqual(packageForA, self.A.package)
+        self.assertEqual(None, self.B.package) 
+
+if __name__ == '__main__':
+    unittest.main()
+#+END_SRC
+** joiner
+*** source
+#+BEGIN_SRC python :tangle ../source/joiner.py
+import node
+import abc
+import distributor as d
+
+
+class Joiner(node.Node):
+    def __init__(self, distributor: d.Distributor):
+        super(Joiner, self).__init__(distributor)
+        self.joinables = {}
+        self.name = None
+        
+    def handlePackage(self, package):
+        joined = self.join(self.joinables)
+        self.joinables = dict.fromkeys(self.joinables)
+        return joined
+
+    #TODO REMOVE HACK 
+    def onReceivedPackage(self, package):
+        self.joinables[package.name] = package
+        if None not in self.joinables.values(): 
+            self.distributor.distribute(self.handlePackage(package))
+    
+    def addJoinableName(self, name: str):
+        self.joinables[name] = None
+
+    def addJoinableNames(self, *names):
+        for name in names:
+            self.joinables[name] = None
+        
+    def removeJoinableName(self, name: str):
+        del self.joinables[name]
+
+    @abc.abstractmethod
+    def join(self, joinables: dict): pass
+#+END_SRC
+*** test
+#+BEGIN_SRC python :tangle ../source/test_joiner.py
+import unittest
+import mock_joiner
+import mock_distributor as mock_d
+import mock_handler
+import mock_package as mock_pk
+import package as pk
+
+class TestJoiner(unittest.TestCase):
+    def setUp(self):
+        self.distributorA = mock_d.MockDistributor()
+        self.distributorB = mock_d.MockDistributor()
+        self.adderDistributor = mock_d.MockDistributor()
+        self.adder = mock_joiner.MockAddJoiner(self.adderDistributor)
+        self.adder.addJoinableNames("A", "B")
+        self.packageReceiver = mock_handler.MockHandler()
+
+        self.distributorA.connect(self.adder)
+        self.distributorB.connect(self.adder)
+        self.adderDistributor.connect(self.packageReceiver)
+
+    def test_handlerReceivesFusedJoinerOutput(self):
+        packageA = pk.Package.make(name = "A", value = 1)
+        packageB = pk.Package.make(name = "B", value = 2)
+        expectedSum = packageA.value + packageB.value
+        self.distributorA.distribute(packageA)
+        self.distributorB.distribute(packageB)
+
+        self.assertEqual(self.packageReceiver.package.value, expectedSum)
+
+if __name__ == '__main__':
+    unittest.main()
+#+END_SRC
+*** mock
+#+BEGIN_SRC python :tangle ../source/mock_joiner.py
+import joiner
+import distributor
+import package as pk
+
+class MockAddJoiner(joiner.Joiner):
+    def join(self, joinables): return pk.Package.make(name = self.name, value = sum(package.value for package in joinables.values()))
+    def onConnected(self): pass
+    def onDisconnected(self): pass
+#+END_SRC
+** imu
+*** source
+#+BEGIN_SRC python :tangle ../source/imu.py
+import joiner
+import distributor
+import quaternion as quat
+import package as pk
+import package_imu as pk_imu
+
+class QuaternionVectorJoiner(joiner.Joiner):
+    def join(self, joinables):
+        quaternion = quat.Quaternion(
+            joinables[self.quaternionName].value.vector,
+            joinables[self.quaternionName].value.scalar)
+
+        vector = quaternion.rotateVector(joinables[self.vectorName].value.values)
+        value = pk_imu.Vector3D.fromContainer(vector)
+        timestamp = int((joinables[self.quaternionName].timestamp + joinables[self.quaternionName].timestamp)/2)
+        return pk.Package.make(name=self.name, value=value, timestamp=timestamp)
+    
+    def addQuaternionName(self, name: str):
+        self.quaternionName = name
+        self.addJoinableName(name)
+
+    def addVectorName(self, name: str):
+        self.vectorName = name
+        self.addJoinableName(name)
+
+    def onConnected(self): pass
+    def onDisconnected(self): pass
+#+END_SRC
+*** test
+#+BEGIN_SRC python :tangle ../source/test_imu.py
+import unittest
+import imu
+import mock_distributor
+import mock_handler
+import package_imu as pk_imu
+import package as pk
+
+class TestQuaternionVectorJoiner(unittest.TestCase):
+    def setUp(self):
+        self.vectorDistributor = mock_distributor.MockDistributor()
+        self.quaternionDistributor = mock_distributor.MockDistributor()
+        self.joinerDistributor = mock_distributor.MockDistributor()
+        self.joiner = imu.QuaternionVectorJoiner(self.joinerDistributor)
+        self.receiver = mock_handler.MockHandler()
+
+        self.joiner.addQuaternionName("Quaternion")
+        self.quaternionDistributor.connect(self.joiner)
+        self.joiner.addVectorName("Vector")
+        self.vectorDistributor.connect(self.joiner)
+        self.joinerDistributor.connect(self.receiver)
+        
+    def test_receivedRotatedVector(self):
+        vectorPackage = pk.Package.make(
+            name="Vector",
+            value=pk_imu.Vector3D.fromComponents(x=1,y=0,z=0),
+            timestamp=1)
+        quaternionPackage = pk.Package.make(
+            name="Quaternion",
+            value=pk_imu.Quaternion.fromComponents(x=0,y=0,z=1,scalar=0),
+            timestamp=3)
+        self.vectorDistributor.distribute(vectorPackage)
+        self.quaternionDistributor.distribute(quaternionPackage)
+
+        expected = pk_imu.Vector3D.fromComponents(x=-1,y=0,z=0).values
+        actual = self.receiver.package.value.values
+        self.assertEqual(expected, actual)
+
+if __name__ == '__main__':
+    unittest.main()        
+#+END_SRC
 ** pair
 #+BEGIN_SRC python :tangle ../source/pair.py
 class Pair:
@@ -443,11 +799,13 @@ class Pair:
 #+END_SRC
 ** quaternion
 *** source
-#+BEGIN_SRC python :tangle ../source/quaternion.py
+#+BEGIN_SRC python :tangle ../source/quaternion.py    
+import copy
+
 class Quaternion:
     normalizingStrategy = None
     
-    def __init__(self, vector, scalar: float):        
+    def __init__(self, vector, scalar):        
         self.vector = vector
         self.scalar = scalar
         
@@ -457,7 +815,7 @@ class Quaternion:
         return resultantQuaternion.vector
         
     def conjugate(self):
-        conjugatedVector = -self.vector.copy()
+        conjugatedVector = self.vector.__class__((-i for i in self.vector))
         return Quaternion(vector=conjugatedVector, scalar=self.scalar)
         
     def __mul__(self, other):
@@ -496,7 +854,7 @@ import quaternion
 class TestQuaternion(unittest.TestCase):
 
     def test_rotateListVector(self):
-        self.quaternion = quaternion.Quaternion([0, 0, 0], 1)        
+        self.quaternion = quaternion.Quaternion((0, 0, 0), 1)        
 
 if __name__ == '__main__':
     unittest.main()
@@ -505,12 +863,20 @@ if __name__ == '__main__':
  #+BEGIN_SRC python :tangle ../source/encoder.py
 import json
 import numpy
+import package as pk
 
 class NumpyEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, numpy.ndarray):
             return obj.tolist()
         return json.JSONEncoder.default(self, obj)
+
+class PackageEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, pk.Package):
+            return obj.package
+        elif isinstance(obj, pk.PackageValue):
+            return obj.values
  #+END_SRC
 ** COMMENT categorizer
 #+BEGIN_SRC python :tangle ../source/categorizer.py
@@ -732,23 +1098,83 @@ output.close()
 
 
 #+END_SRC
+** imu
+#+BEGIN_SRC python :tangle ../script/run_imu.py
+<<include_source>>
+import distributor as d
+import terminal as term
+import associative_distributor as ad
+import splitter
+import imu
+import node
+import package as pk
+import package_imu as pk_imu
+import encoder
+import os
+
+pk.PackageConfig.timestamp = "millis"
+pk.PackageConfig.value = "values"
+
+terminalDistributor = d.SingleDistributor()
+jsonLoadDistributor = d.SingleDistributor()
+#packageDistributor = d.SingleDistributor()
+splitDistributor = ad.KeyDistributor()
+imuDistributor = d.SingleDistributor()
+jsonDumpDistributor = d.MultiDistributor()
+
+#how to name node vs handler vs joiner, splitter? Too many names
+#better name for TerminalDistributor
+terminal = term.TerminalDistributor(terminalDistributor)
+jsonLoadNode = node.JsonLoadNode(jsonLoadDistributor)
+packageSplitter = splitter.PackageSplitter(splitDistributor)
+#packagingNode = node.PackagingNode(packageDistributor)
+#splitNode = splitter.Splitter(splitDistributor)
+imuNode = imu.QuaternionVectorJoiner(imuDistributor)
+jsonDumpNode = node.JsonDumpNode(jsonDumpDistributor, encoder.PackageEncoder)
+stdoutWriter = term.StdoutWriter()
+fileWriter = term.FileWriter(f"{os.path.dirname(sys.argv[1])}/imu")
+
+acceleration = "Linear Acceleration"
+rotation = "Rotation Vector"
+
+#refactor here
+packageSplitter.addPackageClass(rotation, pk_imu.Quaternion)
+packageSplitter.addPackageClass(acceleration, pk_imu.Vector3D)
+
+terminalDistributor.connect(jsonLoadNode)
+jsonLoadDistributor.connect(packageSplitter)
+#packageDistributor.connect(splitNode)
+splitDistributor.connect(acceleration, imuNode)
+splitDistributor.connect(rotation, imuNode)
+imuDistributor.connect(jsonDumpNode)
+jsonDumpDistributor.connect(stdoutWriter)
+jsonDumpDistributor.connect(fileWriter)
+
+imuNode.addQuaternionName(rotation)
+imuNode.addVectorName(acceleration)
+
+terminal.startDistributing()
+
+#needs to be a way to not distribute every time
+#+END_SRC
 ** record
 #+BEGIN_SRC python :tangle ../script/record.py
 <<include_source>>
-import terminal
-import datetime
+import terminal as term
+from datetime import datetime
 import os
+import distributor as d
 
-timeOfRecording = f"{datetime.datetime.now():%Y-%m-%d_%H:%M:%S}"
+timeOfRecording = f"{datetime.now():%Y-%m-%d_%H:%M:%S}"
 os.makedirs("output/" + timeOfRecording)
 
-terminalSubject = terminal.TerminalSubject()
-stdoutObserver = terminal.StdoutObserver()
-fileObserver = terminal.FileObserver(f"output/{timeOfRecording}/raw")
+terminal = term.TerminalDistributor(distributor = d.MultiDistributor())
+stdoutWriter = term.StdoutWriter()
+fileWriter = term.FileWriter(f"output/{timeOfRecording}/raw")
 
-terminalSubject.addObserver(stdoutObserver)
-terminalSubject.addObserver(fileObserver)
-terminalSubject.startNotifying()
+terminal.connect(stdoutWriter)
+terminal.connect(fileWriter)
+terminal.startDistributing()
 #+END_SRC
 ** plot
 #+BEGIN_SRC python :tangle ../script/plot.py
@@ -836,22 +1262,6 @@ jsonDumpNode.addObserver(fileObserver)
 jsonDumpNode.addObserver(stdoutObserver)
 
 inputSubject.startNotifying()
-
-        
-# inputSubject = terminal.TerminalSubject()
-# jsonLoadNode = node.JsonLoadNode()
-# varianceNode = node.StrategyNode(strategy.VarianceStrategy(initial = numpy.zeros(3)))
-# jsonDumpNode = node.JsonDumpNode(jsonEncoder = encoder.NumpyEncoder)
-# fileObserver = terminal.FileObserver(f"{os.path.dirname(sys.argv[1])}/variance")
-# stdoutObserver = terminal.StdoutObserver()
-
-# inputSubject.addObserver(jsonLoadNode)
-# jsonLoadNode.addObserver(varianceNode)
-# varianceNode.addObserver(jsonDumpNode)
-# jsonDumpNode.addObserver(fileObserver)
-# jsonDumpNode.addObserver(stdoutObserver)
-
-# inputSubject.startNotifying()
 #+END_SRC
 ** COMMENT streamServer(Log & File)                              :deprecated:
 #+BEGIN_SRC python :tangle ../script/run_streamServer.py
@@ -1032,24 +1442,24 @@ Kalman Filter State Matrix:
  [[5127.05898493]
  [ 288.55147059]]
 #+end_example
-
+*
 ** numpy ndarray
-#+BEGIN_SRC python :eval no-export
+ #+BEGIN_SRC python :eval no-export
 import numpy
 
 A = numpy.eye(6)
 A[0:3, 3:6] = 2*numpy.eye(3)
 #A = numpy.hstack((numpy.array([*numpy.eye(3), *numpy.eye(3)*2]), numpy.array([*numpy.zeros([3,3]), *numpy.eye(3)])))
 print(A)
-#+END_SRC
+ #+END_SRC
 
-#+RESULTS[c2fea3356f7ba157f983b21c8e180a9c84903dec]:
-: [[1. 0. 0. 2. 0. 0.]
-:  [0. 1. 0. 0. 2. 0.]
-:  [0. 0. 1. 0. 0. 2.]
-:  [0. 0. 0. 1. 0. 0.]
-:  [0. 0. 0. 0. 1. 0.]
-:  [0. 0. 0. 0. 0. 1.]]
+ #+RESULTS[c2fea3356f7ba157f983b21c8e180a9c84903dec]:
+ : [[1. 0. 0. 2. 0. 0.]
+ :  [0. 1. 0. 0. 2. 0.]
+ :  [0. 0. 1. 0. 0. 2.]
+ :  [0. 0. 0. 1. 0. 0.]
+ :  [0. 0. 0. 0. 1. 0.]
+ :  [0. 0. 0. 0. 0. 1.]]
 
 ** transpose 3x9
 #+BEGIN_SRC python :eval no-export
@@ -1121,6 +1531,73 @@ print(sum(a**2))
 #+RESULTS[e19a4225ef6cb94074f406f493ba41c941abb820]:
 : -10
 : 14
+
+** dict from list
+#+BEGIN_SRC python :eval no-export
+l = ["A", "B"]
+d = {i: None for i in l}
+print(d)
+
+d = dict.fromkeys(l)
+print(d)
+#+END_SRC
+
+#+RESULTS[420b00e48f63f7ae914bd04b0137135ba2400479]:
+: {'A': None, 'B': None}
+: {'A': None, 'B': None}
+
+** clear dict values
+#+BEGIN_SRC python :eval no-export
+d = {"A": 1, "B": 2}
+d = dict.fromkeys(d)
+print(d)
+#+END_SRC
+
+#+RESULTS[d0c2a8905c7aa127e44889b5784960c338a222a2]:
+: {'A': None, 'B': None}
+
+** list from list (checking numpy array compatability)
+#+BEGIN_SRC python :eval no-export
+import numpy
+vector = [1, 2, 3]
+a = list(vector)
+b = numpy.array(vector)
+print(a)
+print(b)
+#+END_SRC
+
+#+RESULTS[ad06cfbafab1c9bc9dac16ae92c212c99d84b011]:
+: [1, 2, 3]
+: [1 2 3]
+
+** list from list and value
+#+BEGIN_SRC python :eval no-export
+a = [1, 2, 3]
+b = 4.3
+c = list([*a, b])
+print(c)
+
+import numpy
+a = numpy.asarray(a)
+c = numpy.array([*a, b])
+print(c)
+#+END_SRC
+
+#+RESULTS[46e762ce8de75bca8876337649aa6ce502640afb]:
+: [1, 2, 3, 4.3]
+: [1.  2.  3.  4.3]
+
+** cast list to float
+#+BEGIN_SRC python :eval no-export
+x = [5.4]
+y = (1, 3, 5)
+a = float(*x)
+b = list(*y)
+print(a)
+print(y)
+#+END_SRC
+
+#+RESULTS[cf336f99ddc9779b7fd068e69854f37abeaa9540]:
 
 * Other
 #+name: include_source

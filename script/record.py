@@ -1,16 +1,17 @@
 import sys
 sys.path.append("../source")
-import terminal
-import datetime
+import terminal as term
+from datetime import datetime
 import os
+import distributor as d
 
-timeOfRecording = f"{datetime.datetime.now():%Y-%m-%d_%H:%M:%S}"
+timeOfRecording = f"{datetime.now():%Y-%m-%d_%H:%M:%S}"
 os.makedirs("output/" + timeOfRecording)
 
-terminalSubject = terminal.TerminalSubject()
-stdoutObserver = terminal.StdoutObserver()
-fileObserver = terminal.FileObserver(f"output/{timeOfRecording}/raw")
+terminal = term.TerminalDistributor(distributor = d.MultiDistributor())
+stdoutWriter = term.StdoutWriter()
+fileWriter = term.FileWriter(f"output/{timeOfRecording}/raw")
 
-terminalSubject.addObserver(stdoutObserver)
-terminalSubject.addObserver(fileObserver)
-terminalSubject.startNotifying()
+terminal.connect(stdoutWriter)
+terminal.connect(fileWriter)
+terminal.startDistributing()

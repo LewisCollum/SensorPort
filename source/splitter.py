@@ -1,22 +1,25 @@
 import handler
 import node
-import distributor
+import associative_distributor as ad
+import package as pk
 
-class Splitter(node.AssociativeNode):
-    def __init__(self, distributor: distributor.AssociativeDistributor):
-        super(Splitter, self).__init__(distributor)
-
+class Splitter(node.Node):
     def handlePackage(self, package): return package
+    def onConnected(self): pass
+    def onDisconnected(self): pass
 
-# class Splitter(handler.Handler):
-#     def __init__(self):
-#         self.nodes = {}
+class PackageSplitter(node.Node):
+    def __init__(self, distributor: ad.AssociativeDistributor):
+        super(PackageSplitter, self).__init__(distributor)
+        self.packageClasses = {}
         
-#     def addNamedNode(self, name: str, node: node.Node):
-#         self.nodes[name] = node
+    def handlePackage(self, package):
+        package = pk.Package(package)
+        package.value = self.packageClasses[package.name](package.value)
+        return package
 
-#     def hasNamedNode(self, name: str):
-#         return name in self.nodes
+    def addPackageClass(self, name: str, cls: pk.PackageValue):
+        self.packageClasses[name] = cls
         
-#     def onReceivedPackage(self, package):
-#         self.nodes[package["name"]].onReceivedPackage(package)
+    def onConnected(self): pass
+    def onDisconnected(self): pass

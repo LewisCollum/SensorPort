@@ -50,31 +50,6 @@ class TestMultiDistributor(unittest.TestCase):
 
         self.assertTrue(self.handlerA.wasDisconnected)
         self.assertTrue(self.handlerB.wasDisconnected)
-
-        
-class TestKeyDistributor(unittest.TestCase):
-    def setUp(self):
-        self.unitName = "A"
-        self.unitHandler = mock_handler.MockHandler()
-
-        self.distributor = distributor.KeyDistributor()
-        self.distributor.connect(self.unitName, self.unitHandler)
-        
-    def test_distributeToMultipleHandlers(self):
-        expected = {"name": self.unitName}
-        self.distributor.distribute(expected)
-
-        actual = self.unitHandler.package
-        
-        self.assertEqual(actual, expected)
-        
-    def test_connectToHandlers(self):
-        self.assertTrue(self.unitHandler.wasConnected)
-        
-    def test_disconnectFromHandlers(self):
-        self.distributor.disconnect()
-
-        self.assertTrue(self.unitHandler.wasDisconnected)
         
 if __name__ == '__main__':
     unittest.main()
