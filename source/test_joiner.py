@@ -1,24 +1,21 @@
 import unittest
-import mock_joiner
-import mock_distributor as mock_d
-import mock_handler
-import mock_package as mock_pk
+import mock_joiner as mj
+import mock_distributor as md
+import mock_receiver as mr
 import package as pk
 
-class TestJoiner(unittest.TestCase):
+class TestJoiningNode(unittest.TestCase):
     def setUp(self):
-        self.distributorA = mock_d.MockDistributor()
-        self.distributorB = mock_d.MockDistributor()
-        self.adderDistributor = mock_d.MockDistributor()
-        self.adder = mock_joiner.MockAddJoiner(self.adderDistributor)
-        self.adder.addJoinableNames("A", "B")
-        self.packageReceiver = mock_handler.MockHandler()
+        self.distributorA = md.MockDistributor()
+        self.distributorB = md.MockDistributor()
+        self.adder = mj.MockAddJoiningNode("A", "B")
+        self.packageReceiver = mr.MockReceiver()
 
         self.distributorA.connect(self.adder)
         self.distributorB.connect(self.adder)
-        self.adderDistributor.connect(self.packageReceiver)
+        self.adder.connect(self.packageReceiver)
 
-    def test_handlerReceivesFusedJoinerOutput(self):
+    def test_receiverReceivesFusedJoiningNodeOutput(self):
         packageA = pk.Package.make(name = "A", value = 1)
         packageB = pk.Package.make(name = "B", value = 2)
         expectedSum = packageA.value + packageB.value

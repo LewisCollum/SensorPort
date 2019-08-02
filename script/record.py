@@ -5,13 +5,14 @@ from datetime import datetime
 import os
 import distributor as d
 
+terminalDistributor = d.MultiDistributor()
+terminal = term.Terminal(terminalDistributor)
+stdoutWriter = term.StdoutWriter()
+terminalDistributor.connect(stdoutWriter)
+
 timeOfRecording = f"{datetime.now():%Y-%m-%d_%H:%M:%S}"
 os.makedirs("output/" + timeOfRecording)
 
-terminal = term.TerminalDistributor(distributor = d.MultiDistributor())
-stdoutWriter = term.StdoutWriter()
-fileWriter = term.FileWriter(f"output/{timeOfRecording}/raw")
-
-terminal.connect(stdoutWriter)
-terminal.connect(fileWriter)
-terminal.startDistributing()
+with term.FileWriter(f"output/{timeOfRecording}/raw.json") as fileWriter:
+    terminalDistributor.connect(fileWriter)
+    terminal.startDistributing()

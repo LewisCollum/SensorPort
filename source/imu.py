@@ -1,27 +1,35 @@
-import joiner
-import distributor
+from joining_node import JoiningNode
+import distributor as d
 import quaternion as quat
 import package as pk
 import package_imu as pk_imu
 
-class QuaternionVectorJoiner(joiner.Joiner):
+class QuaternionVectorJoiningNode(JoiningNode):
     def join(self, joinables):
+        quaternionPackage = joinables[self.quaternionName]
+        vectorPackage = joinables[self.vectorName]
+
         quaternion = quat.Quaternion(
-            joinables[self.quaternionName].value.vector,
-            joinables[self.quaternionName].value.scalar)
+	    quaternionPackage[pk.PackageConfig.value][0:3],
+            quaternionPackage[pk.PackageConfig.value][3])
 
-        vector = quaternion.rotateVector(joinables[self.vectorName].value.values)
+        vector = quaternion.rotateVector(vectorPackage[pk.PackageConfig.value])
+
+        # quaternion = quat.Quaternion(
+        #     quaternionPackage.value.vector,
+        #     quaternionPackage.value.scalar)
+
+        #vector = quaternion.rotateVector(vectorPackage.value.values)
+
+        name = self.__class__.__name__
         value = pk_imu.Vector3D.fromContainer(vector)
-        timestamp = int((joinables[self.quaternionName].timestamp + joinables[self.quaternionName].timestamp)/2)
-        return pk.Package.make(name=self.name, value=value, timestamp=timestamp)
-    
-    def addQuaternionName(self, name: str):
-        self.quaternionName = name
-        self.addJoinableName(name)
+        timestamp = int((quaternionPackage[pk.PackageConfig.timestamp] + vectorPackage[pk.PackageConfig.timestamp])/2)
 
-    def addVectorName(self, name: str):
-        self.vectorName = name
-        self.addJoinableName(name)
+        return pk.Package.make(name, value, timestamp)
 
-    def onConnected(self): pass
-    def onDisconnected(self): pass
+    @classmethod
+    def makeFromNames(cls, quaternionName: str, vectorName: str):
+        made = cls(quaternionName, vectorName)
+        made.quaternionName = quaternionName
+        made.vectorName = vectorName
+        return made

@@ -1,55 +1,60 @@
 import unittest
-import distributor
-import mock_distributor
-import mock_handler
+import distributor as d
+import mock_receiver as mh
+import package as pk
 
 class TestSingleDistributor(unittest.TestCase):
     def setUp(self):
-        self.handler = mock_handler.MockHandler()
-        self.distributor = distributor.SingleDistributor()
-        self.distributor.connect(self.handler)
+        self.receiver = mh.MockReceiver()
+        self.distributor = d.SingleDistributor()
+        self.distributor.connect(self.receiver)
         
-    def test_distributeToSingleHandler(self):
+    def test_distributeToSingleReceiver(self):
         expected = "abc"
         self.distributor.distribute(expected)
-        actual = self.handler.package
+        actual = self.receiver.package
+
         self.assertEqual(actual, expected)
         
-    def test_connectToHandler(self):
-        self.assertTrue(self.handler.wasConnected)
-        
-    def test_disconnectFromHandler(self):
-        self.distributor.disconnect()
-        self.assertTrue(self.handler.wasDisconnected)
-
 
 class TestMultiDistributor(unittest.TestCase):
     def setUp(self):
-        self.handlerA = mock_handler.MockHandler()
-        self.handlerB = mock_handler.MockHandler()
-        self.distributor = distributor.MultiDistributor()
-        self.distributor.connect(self.handlerA)
-        self.distributor.connect(self.handlerB)
+        self.receiverA = mh.MockReceiver()
+        self.receiverB = mh.MockReceiver()
+        self.distributor = d.MultiDistributor()
+        self.distributor.connect(self.receiverA)
+        self.distributor.connect(self.receiverB)
         
-    def test_distributeToMultipleHandlers(self):
+    def test_distributeToReceiverA(self):
         expected = "abc"
         self.distributor.distribute(expected)
-
-        actualA = self.handlerA.package
-        actualB = self.handlerB.package
+        actualA = self.receiverA.package
         
         self.assertEqual(actualA, expected)
-        self.assertEqual(actualB, expected)
-        
-    def test_connectToHandlers(self):
-        self.assertTrue(self.handlerA.wasConnected)
-        self.assertTrue(self.handlerB.wasConnected)
-        
-    def test_disconnectFromHandlers(self):
-        self.distributor.disconnect()
 
-        self.assertTrue(self.handlerA.wasDisconnected)
-        self.assertTrue(self.handlerB.wasDisconnected)
+    def test_distributeToReceiverB(self):
+        expected = "abc"
+        self.distributor.distribute(expected)
+        actualB = self.receiverB.package
+        
+        self.assertEqual(actualB, expected)
+
+
+class TestNamingDistributor(unittest.TestCase):
+    def setUp(self):
+        self.distributor = d.NamingDistributor()
+        self.receiver = mh.MockReceiver()
+
+        self.distributor.connect("A", self.receiver)
+        
+    def test_distributeToReceiverA(self):
+        expectedPackage = pk.Package.make(name = "A")
+        self.distributor.distribute(expectedPackage)
+
+        actualPackage = self.receiver.package
+        
+        self.assertEqual(actualPackage, expectedPackage)
+        
         
 if __name__ == '__main__':
     unittest.main()

@@ -1,57 +1,45 @@
 import sys
 sys.path.append("../source")
-import distributor as d
-import terminal as term
-import associative_distributor as ad
-import splitter
-import imu
-import node
-import package as pk
-import package_imu as pk_imu
-import encoder
 import os
 
+import imu
+import package_imu as pk_imu
+import distributor as d
+import terminal as term
+import package as pk
+import packaging_node as pn
+import distributing_node as dn
+import json_node as jn
+import encoder
+        
 pk.PackageConfig.timestamp = "millis"
 pk.PackageConfig.value = "values"
 
+accelerationName = "MPL Accelerometer"
+rotationName = "Rotation Vector"
+
 terminalDistributor = d.SingleDistributor()
-jsonLoadDistributor = d.SingleDistributor()
-#packageDistributor = d.SingleDistributor()
-splitDistributor = ad.KeyDistributor()
-imuDistributor = d.SingleDistributor()
-jsonDumpDistributor = d.MultiDistributor()
+terminal = term.Terminal(terminalDistributor)
 
-#how to name node vs handler vs joiner, splitter? Too many names
-#better name for TerminalDistributor
-terminal = term.TerminalDistributor(terminalDistributor)
-jsonLoadNode = node.JsonLoadNode(jsonLoadDistributor)
-packageSplitter = splitter.PackageSplitter(splitDistributor)
-#packagingNode = node.PackagingNode(packageDistributor)
-#splitNode = splitter.Splitter(splitDistributor)
-imuNode = imu.QuaternionVectorJoiner(imuDistributor)
-jsonDumpNode = node.JsonDumpNode(jsonDumpDistributor, encoder.PackageEncoder)
+loadDistributor = d.NamingDistributor()
+loader = jn.JsonLoadNode()
+loader.setDistributor(loadDistributor)
+
+joiner = imu.QuaternionVectorJoiningNode.makeFromNames(
+    quaternionName = rotationName,
+    vectorName = accelerationName)
+
+dumpDistributor = d.SingleDistributor()
+dumper = jn.JsonDumpNode(encoder.PackageEncoder)
+dumper.setDistributor(dumpDistributor)
+
 stdoutWriter = term.StdoutWriter()
-fileWriter = term.FileWriter(f"{os.path.dirname(sys.argv[1])}/imu")
+fileWriter = term.FileWriter(f"{os.path.dirname(sys.argv[1])}/imu.json")
 
-acceleration = "Linear Acceleration"
-rotation = "Rotation Vector"
-
-#refactor here
-packageSplitter.addPackageClass(rotation, pk_imu.Quaternion)
-packageSplitter.addPackageClass(acceleration, pk_imu.Vector3D)
-
-terminalDistributor.connect(jsonLoadNode)
-jsonLoadDistributor.connect(packageSplitter)
-#packageDistributor.connect(splitNode)
-splitDistributor.connect(acceleration, imuNode)
-splitDistributor.connect(rotation, imuNode)
-imuDistributor.connect(jsonDumpNode)
-jsonDumpDistributor.connect(stdoutWriter)
-jsonDumpDistributor.connect(fileWriter)
-
-imuNode.addQuaternionName(rotation)
-imuNode.addVectorName(acceleration)
-
+terminalDistributor.connect(loader)
+loadDistributor.connect(accelerationName, joiner)
+loadDistributor.connect(rotationName, joiner)
+joiner.connect(dumper)
+dumpDistributor.connect(stdoutWriter)
+dumpDistributor.connect(fileWriter)
 terminal.startDistributing()
-
-#needs to be a way to not distribute every time
