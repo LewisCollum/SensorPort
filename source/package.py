@@ -4,10 +4,25 @@ class PackageConfig:
     name = "name"
     value = "value"
     timestamp = "timestamp"
+
+    @classmethod
+    def nameFromDict(cls, d):
+        return d.get(cls.name)
+
+    @classmethod
+    def valueFromDict(cls, d):
+        return d.get(cls.value)
+
+    @classmethod
+    def timestampFromDict(cls, d):
+        return d.get(cls.timestamp)
     
 class Package:
     def __init__(self, package: dict):
         self.package = package
+
+    def get(self, key):
+        return self.package.get(key)
 
     @property
     def name(self):
@@ -26,7 +41,7 @@ class Package:
         return self.package[PackageConfig.timestamp]
     
     @classmethod
-    def make(cls, name: str = None, timestamp: int = None, value = None):
+    def make(cls, name: str = None, value = None, timestamp: int = None):
         return cls({PackageConfig.name: name, PackageConfig.value: value, PackageConfig.timestamp: timestamp})
 
     @classmethod
@@ -47,9 +62,14 @@ class PackageValue(abc.ABC):
     
     def __init__(self, values):
         self.values = values
+
+    def __eq__(self, other):
+        return self.values == other.values
         
     @classmethod
     def fromContainer(cls, values):
-        if values.__class__ == PackageValue.containerClass:
+        if values == None:
+            return None
+        elif values.__class__ == PackageValue.containerClass:
             return cls(values) 
         return cls(cls.containerClass(values))

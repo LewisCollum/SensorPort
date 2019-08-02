@@ -3,3 +3,5 @@ krita/
 *.html
 __pycache__/
 clean
+figure/
+*#*

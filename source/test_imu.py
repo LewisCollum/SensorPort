@@ -1,23 +1,22 @@
 import unittest
 import imu
-import mock_distributor
-import mock_handler
+import mock_distributor as md
+import mock_receiver as mr
 import package_imu as pk_imu
 import package as pk
 
-class TestQuaternionVectorJoiner(unittest.TestCase):
+class TestQuaternionVectorJoiningNode(unittest.TestCase):
     def setUp(self):
-        self.vectorDistributor = mock_distributor.MockDistributor()
-        self.quaternionDistributor = mock_distributor.MockDistributor()
-        self.joinerDistributor = mock_distributor.MockDistributor()
-        self.joiner = imu.QuaternionVectorJoiner(self.joinerDistributor)
-        self.receiver = mock_handler.MockHandler()
+        self.vectorDistributor = md.MockDistributor()
+        self.quaternionDistributor = md.MockDistributor()
+        self.joiner = imu.QuaternionVectorJoiningNode.makeFromNames(
+            quaternionName = "Quaternion",
+            vectorName = "Vector")
+        self.receiver = mr.MockReceiver()
 
-        self.joiner.addQuaternionName("Quaternion")
         self.quaternionDistributor.connect(self.joiner)
-        self.joiner.addVectorName("Vector")
         self.vectorDistributor.connect(self.joiner)
-        self.joinerDistributor.connect(self.receiver)
+        self.joiner.connect(self.receiver)
         
     def test_receivedRotatedVector(self):
         vectorPackage = pk.Package.make(
