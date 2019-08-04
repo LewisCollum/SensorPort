@@ -1,14 +1,13 @@
+
 import abc
-from receiver import Receiver
-from connector import Connector
+from receiver_interface import Receiver
+from handler_interface import Handler
 from distributor import Distributor
 
 class HandlingNode(Receiver):
-    @abc.abstractmethod
-    def handle(self, package): pass
-
-    def setDistributor(self, distributor: Distributor):
+    def __init__(self, handler: Handler, distributor: Distributor):
+        self.handler = handler
         self.distributor = distributor
-    
+            
     def onReceivedPackage(self, package):
         self.distributor.distribute(self.handle(package))

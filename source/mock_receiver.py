@@ -1,4 +1,5 @@
-from receiver import Receiver
+
+from receiver_interface import Receiver
 
 class MockReceiver(Receiver):
     def __init__(self): self.package = None

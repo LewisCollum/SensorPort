@@ -1,15 +1,14 @@
 
-import abc
 from distributor_interface import Distributor
-from connector_interface import Connector, NameConnector
+from connector_interface import SingleConnector, MultiConnector, NameConnector
 from receiver_interface import Receiver
 import package as pk
             
 class SingleConnectionDistributor(Distributor, SingleConnector):
-    def distribute(self, package):
+    def distributePackage(self, package):
         self.receiver.onReceivedPackage(package)
 
-    def connectToReceiver(self, receiver: Receiver):
+    def connectToReceiver(self, receive: Receiver):
         self.receiver = receiver
         
     def disconnectFromReceiver(self):
@@ -20,14 +19,17 @@ class MultiConnectionDistributor(Distributor, MultiConnector):
     def __init__(self):
         self.receivers = []
 
-    def distribute(self, package):
+    def distributePackage(self, package):
         for receiver in self.receivers:
             receiver.onReceivedPackage(package)
         
     def connectToReceiver(self, receiver: Receiver):
         self.receivers.append(receiver)
 
-    def disconnect(self):
+    def disconnectFromReceiver(self, receiver: Receiver):
+        self.receivers.remove(receiver)
+
+    def disconnectFromAllReceivers(self):
         self.receivers.clear()
 
         
@@ -35,12 +37,15 @@ class NamedConnectionDistributor(Distributor, NameConnector):
     def __init__(self):
         self.receivers = {}
 
-    def distribute(self, package):
+    def distributePackage(self, package):
         for receiver in self.receivers[pk.PackageConfig.nameFromDict(package)]:
             receiver.onReceivedPackage(package)
         
-    def connectToReceiver(self, name: str, receiver: Receiver):
+    def connectByNameToReceiver(self, name: str, receiver: Receiver):
         self.receivers.setdefault(name, []).append(receiver)
-        
-    def disconnect(self):
+
+    def disconnectByNameFromReceiver(self, name: str):
+        del self.receivers[name]
+    
+    def disconnectFromAllReceivers(self):
         self.receivers.clear()

@@ -1,3 +1,4 @@
+
 import strategy
 
 class MockStrategy(strategy.Strategy):

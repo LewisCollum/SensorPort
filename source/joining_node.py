@@ -1,3 +1,4 @@
+
 import abc
 import distributor as d
 from connector import Connector
@@ -30,7 +31,7 @@ class JoiningNode(Receiver, Connector):
     def clearJoinablePackages(self):
         self.joinables = dict.fromkeys(self.joinables)
 
-    def connect(self, receiver):
+    def connectToReceiver(self, receiver):
         self.nextReceiver = receiver
 
     def disconnect(self):

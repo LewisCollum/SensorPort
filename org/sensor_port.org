@@ -14,170 +14,200 @@
 **** DONE Extract ~package.setdefault("strategies", []).append(self.strategy.__class__.__name__~ from =node= :T720_1:node:
 	 CLOSED: [2019-07-24 Wed 17:54]
 **** TODO Buffering strategy for Joiners                      :T724_1:Joiner:
-	 - ~self.joinables = dict.fromkeys(self.joinables)~ clears the "buffer".
+	 - ~self.joinables = dict.fromkeys(self.joinables)~ clears the
+       "buffer".
+**** TODO testing setup for node
 * Modules
 ** base
-*** receiver                                                         :mocked:
+*** receiver_interface 												 :mocked:
 **** source
- #+BEGIN_SRC python :tangle ../source/receiver.py
+#+BEGIN_SRC python :tangle ../source/receiver_interface.py
 import abc
 
-class Receiver:
+class Receiver(abc.ABC):
     @abc.abstractmethod
     def onReceivedPackage(self, package): pass
- #+END_SRC
+#+END_SRC
 **** mock
- #+BEGIN_SRC python :tangle ../source/mock_receiver.py
-from receiver import Receiver
+#+BEGIN_SRC python :tangle ../source/mock_receiver.py
+from receiver_interface import Receiver
 
 class MockReceiver(Receiver):
     def __init__(self): self.package = None
     def onReceivedPackage(self, package): self.package = package
- #+END_SRC
-*** node
-**** source
-#+BEGIN_SRC python :tangle ../source/node.py
-from receiver import Receiver
-from handler import Handler
-from distributor import Distributor
-
-class Node(Receiver):
-    def __init__(self, handler: Handler, distributor: Distributor):
-        self.handler = Handler
-        self.distributor = Distributor
-
-    def onReceivedPackage(self, package):
-        self.distributor.distribute(self.handler.handle(package))        
 #+END_SRC
-*** connector
+*** distributor_interface
 **** source
- #+BEGIN_SRC python :tangle ../source/connector.py
+#+BEGIN_SRC python :tangle ../source/distributor_interface.py
 import abc
-from receiver import Receiver
 
-class Connector:
+class Distributor(abc.ABC):
     @abc.abstractmethod
-    def connect(self, receiver: Receiver): pass
+    def distributePackage(self, package): pass
+#+END_SRC
+**** mock
+#+BEGIN_SRC python :tangle ../source/mock_distributor.py
+from distributor_interface import Distributor
+from receiver_interface import Receiver
 
-    @abc.abstractmethod
-    def disconnect(self): pass
-
-    
-class NamingConnector:
-    @abc.abstractmethod
-    def connect(self, name: str, receiver: Receiver): pass
-    
-    @abc.abstractmethod
-    def disconnect(self, name: str): pass
- #+END_SRC
-*** distributor                                               :tested:mocked:
-**** source
- #+BEGIN_SRC python :tangle ../source/distributor.py
-import abc
-from connector import Connector
-from connector import NamingConnector
-from receiver import Receiver
-import package as pk
-
-class Distributor:
-    @abc.abstractmethod
-    def distribute(self, package): pass
-
-            
-class SingleDistributor(Distributor, Connector):
-    def distribute(self, package):
-        self.receiver.onReceivedPackage(package)
-
-    def connect(self, receiver: Receiver):
+class MockDistributor(Distributor):
+    def __init__(self, receiver: Receiver):
         self.receiver = receiver
         
-    def disconnect(self):
+    def distributePackage(self, package):
+        self.receiver.onReceivedPackage(package)
+#+END_SRC
+*** connector_interface
+**** source
+#+BEGIN_SRC python :tangle ../source/connector_interface.py
+import abc
+from receiver_interface import Receiver
+
+class SingleConnector(abc.ABC):
+    @abc.abstractmethod
+    def connectToReceiver(self, receiver: Receiver): pass
+
+    @abc.abstractmethod
+    def disconnectFromReceiver(self): pass
+
+    
+class MultiConnector(abc.ABC):
+    @abc.abstractmethod
+    def connectToReceiver(self, receiver: Receiver): pass
+
+    @abc.abstractmethod
+    def disconnectFromReceiver(self, receiver: Receiver): pass
+
+    @abc.abstractmethod
+    def disconnectFromAllReceivers(self): pass
+
+    
+class NameConnector(abc.ABC):
+    @abc.abstractmethod
+    def connectByNameToReceiver(self, name: str, receiver: Receiver): pass
+
+    @abc.abstractmethod
+    def disconnectByNameFromReceiver(self, name: str): pass
+
+    @abc.abstractmethod
+    def disconnectFromAllReceivers(self): pass
+#+END_SRC
+*** handler_interface
+#+BEGIN_SRC python :tangle ../source/handler_interface.py
+import abc
+
+class Handler(abc.ABC):
+    @abstractmethod
+    def handlePackage(self, package): pass
+#+END_SRC
+*** connection_distributor 									  :tested:mocked:
+**** source
+#+BEGIN_SRC python :tangle ../source/connection_distributor.py
+from distributor_interface import Distributor
+from connector_interface import SingleConnector, MultiConnector, NameConnector
+from receiver_interface import Receiver
+import package as pk
+            
+class SingleConnectionDistributor(Distributor, SingleConnector):
+    def distributePackage(self, package):
+        self.receiver.onReceivedPackage(package)
+
+    def connectToReceiver(self, receive: Receiver):
+        self.receiver = receiver
+        
+    def disconnectFromReceiver(self):
         self.receiver = None
         
     
-class MultiDistributor(Distributor, Connector):
+class MultiConnectionDistributor(Distributor, MultiConnector):
     def __init__(self):
         self.receivers = []
 
-    def distribute(self, package):
+    def distributePackage(self, package):
         for receiver in self.receivers:
             receiver.onReceivedPackage(package)
         
-    def connect(self, receiver: Receiver):
+    def connectToReceiver(self, receiver: Receiver):
         self.receivers.append(receiver)
 
-    def disconnect(self):
+    def disconnectFromReceiver(self, receiver: Receiver):
+        self.receivers.remove(receiver)
+
+    def disconnectFromAllReceivers(self):
         self.receivers.clear()
 
         
-class NamingDistributor(Distributor, NamingConnector):
+class NamedConnectionDistributor(Distributor, NameConnector):
     def __init__(self):
         self.receivers = {}
 
-    def distribute(self, package):
+    def distributePackage(self, package):
         for receiver in self.receivers[pk.PackageConfig.nameFromDict(package)]:
             receiver.onReceivedPackage(package)
         
-    def connect(self, name: str, receiver: Receiver):
+    def connectByNameToReceiver(self, name: str, receiver: Receiver):
         self.receivers.setdefault(name, []).append(receiver)
-        
-    def disconnect(self):
+
+    def disconnectByNameFromReceiver(self, name: str):
+        del self.receivers[name]
+    
+    def disconnectFromAllReceivers(self):
         self.receivers.clear()
- #+END_SRC
+#+END_SRC
 **** test
- #+BEGIN_SRC python :tangle ../source/test_distributor.py
+#+BEGIN_SRC python :tangle ../source/test_connection_distributor.py
 import unittest
-import distributor as d
+from connection_distributor import SingleConnectionDistributor, MultiConnectionDistributor, NamedConnectionDistributor
 import mock_receiver as mh
 import package as pk
 
-class TestSingleDistributor(unittest.TestCase):
+class TestSingleConnectionDistributor(unittest.TestCase):
     def setUp(self):
+        self.distributor = SingleConnectionDistributor()
         self.receiver = mh.MockReceiver()
-        self.distributor = d.SingleDistributor()
-        self.distributor.connect(self.receiver)
+        self.distributor.connectToReceiver(self.receiver)
         
     def test_distributeToSingleReceiver(self):
         expected = "abc"
-        self.distributor.distribute(expected)
+        self.distributor.distributePackage(expected)
         actual = self.receiver.package
 
         self.assertEqual(actual, expected)
         
 
-class TestMultiDistributor(unittest.TestCase):
+class TestMultiConnectionDistributor(unittest.TestCase):
     def setUp(self):
         self.receiverA = mh.MockReceiver()
         self.receiverB = mh.MockReceiver()
-        self.distributor = d.MultiDistributor()
-        self.distributor.connect(self.receiverA)
-        self.distributor.connect(self.receiverB)
-        
+        self.distributor = MultiConnectionDistributor()
+        self.distributor.connectToReceiver(self.receiverA)
+        self.distributor.connectToReceiver(self.receiverB)
+    
     def test_distributeToReceiverA(self):
         expected = "abc"
-        self.distributor.distribute(expected)
+        self.distributor.distributePackage(expected)
         actualA = self.receiverA.package
         
         self.assertEqual(actualA, expected)
 
     def test_distributeToReceiverB(self):
         expected = "abc"
-        self.distributor.distribute(expected)
+        self.distributor.distributePackage(expected)
         actualB = self.receiverB.package
         
         self.assertEqual(actualB, expected)
 
 
-class TestNamingDistributor(unittest.TestCase):
+class TestNamedConnectionDistributor(unittest.TestCase):
     def setUp(self):
-        self.distributor = d.NamingDistributor()
+        self.distributor = NamedConnectionDistributor()
         self.receiver = mh.MockReceiver()
 
-        self.distributor.connect("A", self.receiver)
+        self.distributor.connectByNameToReceiver("A", self.receiver)
         
     def test_distributeToReceiverA(self):
         expectedPackage = pk.Package.make(name = "A")
-        self.distributor.distribute(expectedPackage)
+        self.distributor.distributePackage(expectedPackage)
 
         actualPackage = self.receiver.package
         
@@ -188,7 +218,7 @@ if __name__ == '__main__':
     unittest.main()
  #+END_SRC
 **** mock
- #+BEGIN_SRC python :tangle ../source/mock_distributor.py
+#+BEGIN_SRC python :tangle ../source/mock_distributor.py
 from receiver import Receiver
 from distributor import Distributor
 from distributor import NamingDistributor
@@ -197,7 +227,7 @@ class MockDistributor(Distributor):
     def distribute(self, package):
         self.receiver.onReceivedPackage(package)
 
-    def connect(self, receiver: Receiver):
+    def connectToReceiver(self, receiver: Receiver):
         self.receiver = receiver
 
     def disconnect(self): pass
@@ -210,13 +240,28 @@ class MockNamingDistributor(NamingDistributor):
     def distribute(self, package):
         self.receiver[package.name].onReceivedPackage(package)
         
-    def connect(self, name: str, receiver: Receiver):
+    def connectToReceiver(self, name: str, receiver: Receiver):
         self.receiver[name] = receiver
         
     def disconnect(self): pass
- #+END_SRC
+#+END_SRC
 *** handling_node
- #+BEGIN_SRC python :tangle ../source/handling_node.py
+#+BEGIN_SRC python :tangle ../source/handling_node.py
+import abc
+from receiver_interface import Receiver
+from handler_interface import Handler
+from distributor import Distributor
+
+class HandlingNode(Receiver):
+    def __init__(self, handler: Handler, distributor: Distributor):
+        self.handler = handler
+        self.distributor = distributor
+            
+    def onReceivedPackage(self, package):
+        self.distributor.distribute(self.handle(package))
+#+END_SRC
+*** old_handling_node
+#+BEGIN_SRC python :tangle ../source/handling_node.py
 import abc
 from receiver import Receiver
 from connector import Connector
@@ -231,7 +276,7 @@ class HandlingNode(Receiver):
     
     def onReceivedPackage(self, package):
         self.distributor.distribute(self.handle(package))
- #+END_SRC
+#+END_SRC
 *** distributing_node
  #+BEGIN_SRC python :tangle ../source/distributing_node.py
 import abc
@@ -346,7 +391,7 @@ class JoiningNode(Receiver, Connector):
     def clearJoinablePackages(self):
         self.joinables = dict.fromkeys(self.joinables)
 
-    def connect(self, receiver):
+    def connectToReceiver(self, receiver):
         self.nextReceiver = receiver
 
     def disconnect(self):
@@ -422,7 +467,7 @@ class TerminalDistributor(Distributor, Connector):
     def distribute(self, package):
         self.receiver.onReceivedPackage(package)
         
-    def connect(self, receiver: Receiver):
+    def connectToReceiver(self, receiver: Receiver):
         self.receiver = receiver
 
     def disconnect(self):

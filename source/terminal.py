@@ -1,3 +1,4 @@
+
 import sys
 from connector import Connector
 from distributor import Distributor
@@ -24,7 +25,7 @@ class TerminalDistributor(Distributor, Connector):
     def distribute(self, package):
         self.receiver.onReceivedPackage(package)
         
-    def connect(self, receiver: Receiver):
+    def connectToReceiver(self, receiver: Receiver):
         self.receiver = receiver
 
     def disconnect(self):
