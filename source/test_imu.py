@@ -21,11 +21,11 @@ class TestQuaternionVectorJoiningNode(unittest.TestCase):
     def test_receivedRotatedVector(self):
         vectorPackage = pk.Package.make(
             name="Vector",
-            value=pk_imu.Vector3D.fromComponents(x=1,y=0,z=0),
+            value=pk_imu.Vector3D.fromComponents(x=1,y=0,z=0).toTuple(),
             timestamp=1)
         quaternionPackage = pk.Package.make(
             name="Quaternion",
-            value=pk_imu.Quaternion.fromComponents(x=0,y=0,z=1,scalar=0),
+            value=pk_imu.Quaternion.fromComponents(x=0,y=0,z=1,scalar=0).toTuple(),
             timestamp=3)
         self.vectorDistributor.distribute(vectorPackage)
         self.quaternionDistributor.distribute(quaternionPackage)

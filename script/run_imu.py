@@ -7,9 +7,8 @@ import package_imu as pk_imu
 import distributor as d
 import terminal as term
 import package as pk
-import packaging_node as pn
-import distributing_node as dn
-import json_node as jn
+import packaging_handler as pn
+import json_handler as jn
 import encoder
         
 pk.PackageConfig.timestamp = "millis"
@@ -22,7 +21,7 @@ terminalDistributor = d.SingleDistributor()
 terminal = term.Terminal(terminalDistributor)
 
 loadDistributor = d.NamingDistributor()
-loader = jn.JsonLoadNode()
+loader = jn.JsonLoadHandler()
 loader.setDistributor(loadDistributor)
 
 joiner = imu.QuaternionVectorJoiningNode.makeFromNames(
@@ -30,7 +29,7 @@ joiner = imu.QuaternionVectorJoiningNode.makeFromNames(
     vectorName = accelerationName)
 
 dumpDistributor = d.SingleDistributor()
-dumper = jn.JsonDumpNode(encoder.PackageEncoder)
+dumper = jn.JsonDumpHandler(encoder.PackageEncoder)
 dumper.setDistributor(dumpDistributor)
 
 stdoutWriter = term.StdoutWriter()

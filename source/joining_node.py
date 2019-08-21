@@ -4,9 +4,10 @@ from connector import Connector
 from receiver import Receiver
 import package as pk
 
-class JoiningNode(Receiver, Connector):
+class JoiningNode(Receiver):
     def __init__(self, *joinableNames):
         self.joinables = dict.fromkeys(joinableNames)
+        self.distributor = d.SingleDistributor()
 
     @abc.abstractmethod
     def join(self, joinables: dict): pass
@@ -14,15 +15,12 @@ class JoiningNode(Receiver, Connector):
     def onReceivedPackage(self, package):
         self.setJoinablePackage(package)
         if self.hasPackageForEachJoinable():
-            self.sendJoinedPackageToNextReceiver()
+            joinedPackage = self.join(self.joinables)
+            self.distributor.distribute(joinedPackage)        
             self.clearJoinablePackages()
 
     def setJoinablePackage(self, package):
         self.joinables[pk.PackageConfig.nameFromDict(package)] = package
-
-    def sendJoinedPackageToNextReceiver(self):
-        joinedPackage = self.join(self.joinables)
-        self.nextReceiver.onReceivedPackage(joinedPackage)        
             
     def hasPackageForEachJoinable(self):
         return None not in self.joinables.values()        
@@ -31,7 +29,7 @@ class JoiningNode(Receiver, Connector):
         self.joinables = dict.fromkeys(self.joinables)
 
     def connect(self, receiver):
-        self.nextReceiver = receiver
+        self.distributor.connect(receiver)
 
     def disconnect(self):
-        self.nextReceiver = None
+        self.distributor.disconnect()

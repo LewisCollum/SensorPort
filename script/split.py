@@ -5,7 +5,7 @@ import terminal as term
 import distributor as d
 from handling_node import HandlingNode
 import package as pk
-import json_node as jn
+import json_handler as jn
 
 pk.PackageConfig.value = "values"
 pk.PackageConfig.timestamp = "millis"
@@ -35,7 +35,7 @@ terminalDistributor = d.MultiDistributor()
 terminal = term.Terminal(terminalDistributor)
 
 loadDistributor = d.NamingDistributor()
-loader = jn.JsonLoadNode()
+loader = jn.JsonLoadHandler()
 loader.setDistributor(loadDistributor)
 
 rotationDistributor = d.SingleDistributor()
@@ -46,10 +46,10 @@ accelerometerModifier = AccelerationModifier()
 accelerometerModifier.setDistributor(accelerometerDistributor)
 
 rotationDumpDistributor = d.SingleDistributor()
-rotationDumper = jn.JsonDumpNode()
+rotationDumper = jn.JsonDumpHandler()
 rotationDumper.setDistributor(rotationDumpDistributor)
 accelerometerDumpDistributor = d.SingleDistributor()
-accelerometerDumper = jn.JsonDumpNode()
+accelerometerDumper = jn.JsonDumpHandler()
 accelerometerDumper.setDistributor(accelerometerDumpDistributor)
 
 accelerometerWriter = term.FileWriter(accelerometerPath)

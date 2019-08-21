@@ -1,8 +1,8 @@
-from handling_node import HandlingNode
 import pair
 import package as pk
+from handler import Handler
 
-class Integrator(HandlingNode):
+class Integrator(Handler):
     def __init__(self, name: str = None):
         self.name = name
         self.time = pair.Pair()
@@ -10,9 +10,7 @@ class Integrator(HandlingNode):
         
     def handle(self, package):
         self.time.shift(package.timestamp)
-        self.value.shift(package.value.values)
+        self.value.shift(package.value)
         if self.time.previous != None:
-            PackageValueClass = package.value.__class__
             value = self.value.previous + self.value.current*self.time.difference
-            value = PackageValueClass(value)
             return pk.Package.make(self.name, value, self.time.current)

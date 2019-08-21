@@ -10,20 +10,14 @@ class QuaternionVectorJoiningNode(JoiningNode):
         vectorPackage = joinables[self.vectorName]
 
         quaternion = quat.Quaternion(
-	    quaternionPackage[pk.PackageConfig.value][0:3],
-            quaternionPackage[pk.PackageConfig.value][3])
+	    quaternionPackage.value[0:3],
+            quaternionPackage.value[3])
 
-        vector = quaternion.rotateVector(vectorPackage[pk.PackageConfig.value])
-
-        # quaternion = quat.Quaternion(
-        #     quaternionPackage.value.vector,
-        #     quaternionPackage.value.scalar)
-
-        #vector = quaternion.rotateVector(vectorPackage.value.values)
+        vector = quaternion.rotateVector(vectorPackage.value)
 
         name = self.__class__.__name__
         value = pk_imu.Vector3D.fromContainer(vector)
-        timestamp = int((quaternionPackage[pk.PackageConfig.timestamp] + vectorPackage[pk.PackageConfig.timestamp])/2)
+        timestamp = int((quaternionPackage.timestamp + vectorPackage.timestamp)/2)
 
         return pk.Package.make(name, value, timestamp)
 
