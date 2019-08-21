@@ -1,13 +1,13 @@
 from receiver import Receiver
 from connector import Connector
-from handling_node import HandlingNode
+from handler import Handler
 import json
 
-class JsonLoadNode(HandlingNode):
+class JsonLoadHandler(Handler):
     def handle(self, package):
         return json.loads(package)
 
-class JsonDumpNode(HandlingNode):
+class JsonDumpHandler(Handler):
     def __init__(self, jsonEncoder = None):
         self.jsonEncoder = jsonEncoder
 

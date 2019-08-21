@@ -1,7 +1,7 @@
-from handling_node import HandlingNode
 import package as pk
+from handler import Handler
 
-class PackagingNode(HandlingNode):
+class PackagingHandler(Handler):
     def __init__(self, PackageValueClass: pk.PackageValue = pk.PackageValue):
         self.PackageValueClass = PackageValueClass
 
