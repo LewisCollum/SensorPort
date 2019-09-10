@@ -1,1 +1,3 @@
 #+title: SensorPort
+*** Real-Time Distributed IMU: Project That Uses SensorPort
+[[https://github.com/LewisCollum/SensorPort/blob/master/doc/figure/2019-08-02_RAPS_Poster.png]]
